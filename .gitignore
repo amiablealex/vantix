@@ -12,6 +12,7 @@ logs/*.log
 *.log
 *.deb
 *.env
+*.db
     
 # IDE/Editor specific files (examples)
 .vscode/
