@@ -1,18 +1,17 @@
 /**
  * Vantix Dashboard - Charts
- * Chart.js implementations for data visualization
+ * Chart.js implementations with master filter integration
  */
 
 // Initialize Cumulative Points Chart
 function initializeCumulativePointsChart() {
-    const selectedTeams = Array.from(VantixDashboard.selectedTeamsPoints);
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
     fetch(`/api/cumulative-points?${queryString}`)
         .then(response => response.json())
         .then(data => {
             renderCumulativePointsChart(data.teams);
-            renderTeamPills('teamPillsPoints', 'points');
         })
         .catch(error => {
             console.error('Error loading cumulative points:', error);
@@ -23,13 +22,11 @@ function initializeCumulativePointsChart() {
 function renderCumulativePointsChart(teamsData) {
     const ctx = document.getElementById('cumulativePointsChart');
     
-    // Destroy existing chart if it exists
     if (VantixDashboard.charts.points) {
         VantixDashboard.charts.points.destroy();
     }
     
-    // Prepare datasets
-    const datasets = teamsData.map((team, index) => {
+    const datasets = teamsData.map((team) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
         const teamIndex = VantixDashboard.teams.indexOf(teamInfo);
         const color = getTeamColor(teamIndex);
@@ -49,7 +46,6 @@ function renderCumulativePointsChart(teamsData) {
         };
     });
     
-    // Create chart
     VantixDashboard.charts.points = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -61,9 +57,7 @@ function renderCumulativePointsChart(teamsData) {
                 intersect: false
             },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     backgroundColor: '#FFFFFF',
                     titleColor: '#3A3A3A',
@@ -72,76 +66,22 @@ function renderCumulativePointsChart(teamsData) {
                     borderWidth: 1,
                     padding: 12,
                     displayColors: true,
-                    boxWidth: 12,
-                    boxHeight: 12,
-                    boxPadding: 4,
-                    titleFont: {
-                        family: "'Inter', sans-serif",
-                        size: 13,
-                        weight: '600'
-                    },
-                    bodyFont: {
-                        family: "'Inter', sans-serif",
-                        size: 12
-                    },
                     callbacks: {
-                        title: function(context) {
-                            return 'Gameweek ' + context[0].parsed.x;
-                        },
-                        label: function(context) {
-                            return context.dataset.label + ': ' + context.parsed.y + ' pts';
-                        }
+                        title: (context) => 'Gameweek ' + context[0].parsed.x,
+                        label: (context) => context.dataset.label + ': ' + context.parsed.y + ' pts'
                     }
                 }
             },
             scales: {
                 x: {
                     type: 'linear',
-                    title: {
-                        display: true,
-                        text: 'Gameweek',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        },
-                        stepSize: 1
-                    }
+                    title: { display: true, text: 'Gameweek' },
+                    grid: { color: '#F5F2EB' },
+                    ticks: { stepSize: 1 }
                 },
                 y: {
-                    title: {
-                        display: true,
-                        text: 'Cumulative Points',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        }
-                    }
+                    title: { display: true, text: 'Cumulative Points' },
+                    grid: { color: '#F5F2EB' }
                 }
             }
         }
@@ -150,69 +90,64 @@ function renderCumulativePointsChart(teamsData) {
 
 // Initialize League Position Chart
 function initializeLeaguePositionChart() {
-    const selectedTeams = Array.from(VantixDashboard.selectedTeamsPosition);
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
     fetch(`/api/league-positions?${queryString}`)
         .then(response => response.json())
         .then(data => {
             renderLeaguePositionChart(data.teams);
-            renderTeamPills('teamPillsPosition', 'position');
         })
         .catch(error => {
             console.error('Error loading league positions:', error);
         });
 }
 
-// Render League Position Chart
+// Render League Position Chart with VERY VISIBLE chip markers
 function renderLeaguePositionChart(teamsData) {
     const ctx = document.getElementById('leaguePositionChart');
     
-    // Destroy existing chart if it exists
     if (VantixDashboard.charts.position) {
         VantixDashboard.charts.position.destroy();
     }
     
     if (!teamsData || teamsData.length === 0) {
-        // Show "no data" message
-        ctx.parentElement.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. Please select teams.</p><canvas id="leaguePositionChart"></canvas>';
+        ctx.parentElement.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="leaguePositionChart"></canvas>';
         return;
     }
     
-    // Prepare datasets
-    const datasets = teamsData.map((team, index) => {
+    const datasets = teamsData.map((team) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
         const teamIndex = VantixDashboard.teams.indexOf(teamInfo);
         const color = getTeamColor(teamIndex);
         
-        // Add chip markers as point styles
         const pointStyles = team.data.map(point => {
-            const chipAtGW = team.chips.find(c => c.gameweek === point.x);
-            return chipAtGW ? 'star' : 'circle';
+            return team.chips.find(c => c.gameweek === point.x) ? 'star' : 'circle';
         });
         
         const pointRadii = team.data.map(point => {
-            const chipAtGW = team.chips.find(c => c.gameweek === point.x);
-            return chipAtGW ? 8 : 0;
+            return team.chips.find(c => c.gameweek === point.x) ? 12 : 0;  // Much larger!
         });
+        
+        // Use SOLID DARK colors for chip markers
+        const chipColor = '#1A1A1A';  // Very dark, almost black
         
         return {
             label: team.team_name,
             data: team.data,
             borderColor: color,
-            backgroundColor: color,
+            backgroundColor: chipColor,  // Dark solid color for stars
             borderWidth: 3,
             tension: 0.3,
             pointStyle: pointStyles,
             pointRadius: pointRadii,
-            pointHoverRadius: 8,
-            pointBackgroundColor: color,
-            pointBorderColor: '#FFFFFF',
-            pointBorderWidth: 2
+            pointHoverRadius: 14,
+            pointBackgroundColor: chipColor,  // Dark fill
+            pointBorderColor: color,  // Team color border for contrast
+            pointBorderWidth: 3
         };
     });
     
-    // Create chart
     VantixDashboard.charts.position = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -224,9 +159,7 @@ function renderLeaguePositionChart(teamsData) {
                 intersect: false
             },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     backgroundColor: '#FFFFFF',
                     titleColor: '#3A3A3A',
@@ -234,32 +167,13 @@ function renderLeaguePositionChart(teamsData) {
                     borderColor: '#E8DCC4',
                     borderWidth: 1,
                     padding: 12,
-                    displayColors: true,
-                    boxWidth: 12,
-                    boxHeight: 12,
-                    boxPadding: 4,
-                    titleFont: {
-                        family: "'Inter', sans-serif",
-                        size: 13,
-                        weight: '600'
-                    },
-                    bodyFont: {
-                        family: "'Inter', sans-serif",
-                        size: 12
-                    },
                     callbacks: {
-                        title: function(context) {
-                            return 'Gameweek ' + context[0].parsed.x;
-                        },
-                        label: function(context) {
+                        title: (context) => 'Gameweek ' + context[0].parsed.x,
+                        label: (context) => {
                             const team = teamsData[context.datasetIndex];
                             const chipAtGW = team.chips.find(c => c.gameweek === context.parsed.x);
                             let label = context.dataset.label + ': Position ' + context.parsed.y;
-                            
-                            if (chipAtGW) {
-                                label += ' ★ ' + chipAtGW.chip;
-                            }
-                            
+                            if (chipAtGW) label += ' ★ ' + chipAtGW.chip;
                             return label;
                         }
                     }
@@ -268,72 +182,51 @@ function renderLeaguePositionChart(teamsData) {
             scales: {
                 x: {
                     type: 'linear',
-                    title: {
-                        display: true,
-                        text: 'Gameweek',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        },
-                        stepSize: 1
-                    }
+                    title: { display: true, text: 'Gameweek' },
+                    grid: { color: '#F5F2EB' },
+                    ticks: { stepSize: 1 }
                 },
                 y: {
-                    reverse: true, // Lower position number is better
-                    title: {
-                        display: true,
-                        text: 'League Position',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        },
-                        stepSize: 1
-                    }
+                    reverse: true,
+                    title: { display: true, text: 'League Position' },
+                    grid: { color: '#F5F2EB' },
+                    ticks: { stepSize: 1 }
                 }
             }
         }
     });
 }
 
-// Initialize Form Chart (Last 5 GWs)
+// Initialize Form Chart
 function initializeFormChart() {
-    const selectedTeams = Array.from(VantixDashboard.selectedTeamsForm);
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
+    console.log('Initializing form chart with teams:', selectedTeams);
+    console.log('Query string:', queryString);
+    
     fetch(`/api/form-chart?${queryString}`)
-        .then(response => response.json())
+        .then(response => {
+            console.log('Form chart response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log('Form chart data received:', data);
+            if (!data.teams || data.teams.length === 0) {
+                console.warn('No teams data in form chart response');
+                document.getElementById('formChart').parentElement.innerHTML = 
+                    '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. You may need to play more gameweeks.</p><canvas id="formChart"></canvas>';
+                return;
+            }
             renderFormChart(data.teams);
-            renderTeamPills('teamPillsForm', 'form');
         })
         .catch(error => {
             console.error('Error loading form chart:', error);
+            document.getElementById('formChart').parentElement.innerHTML = 
+                '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load form data</p><canvas id="formChart"></canvas>';
         });
 }
 
@@ -341,13 +234,23 @@ function initializeFormChart() {
 function renderFormChart(teamsData) {
     const ctx = document.getElementById('formChart');
     
-    // Destroy existing chart if it exists
+    if (!ctx) {
+        console.error('Form chart canvas not found');
+        return;
+    }
+    
     if (VantixDashboard.charts.form) {
         VantixDashboard.charts.form.destroy();
     }
     
-    // Prepare datasets
-    const datasets = teamsData.map((team, index) => {
+    if (!teamsData || teamsData.length === 0) {
+        console.warn('No teams data to render in form chart');
+        return;
+    }
+    
+    console.log('Rendering form chart with', teamsData.length, 'teams');
+    
+    const datasets = teamsData.map((team) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
         const teamIndex = VantixDashboard.teams.indexOf(teamInfo);
         const color = getTeamColor(teamIndex);
@@ -368,7 +271,6 @@ function renderFormChart(teamsData) {
         };
     });
     
-    // Create chart
     VantixDashboard.charts.form = new Chart(ctx, {
         type: 'line',
         data: { datasets },
@@ -380,9 +282,7 @@ function renderFormChart(teamsData) {
                 intersect: false
             },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     backgroundColor: '#FFFFFF',
                     titleColor: '#3A3A3A',
@@ -390,113 +290,139 @@ function renderFormChart(teamsData) {
                     borderColor: '#E8DCC4',
                     borderWidth: 1,
                     padding: 12,
-                    displayColors: true,
-                    boxWidth: 12,
-                    boxHeight: 12,
-                    boxPadding: 4,
-                    titleFont: {
-                        family: "'Inter', sans-serif",
-                        size: 13,
-                        weight: '600'
-                    },
-                    bodyFont: {
-                        family: "'Inter', sans-serif",
-                        size: 12
-                    },
                     callbacks: {
-                        title: function(context) {
-                            return 'Gameweek ' + context[0].parsed.x;
-                        },
-                        label: function(context) {
-                            return context.dataset.label + ': ' + context.parsed.y + ' pts';
-                        }
+                        title: (context) => 'Gameweek ' + context[0].parsed.x,
+                        label: (context) => context.dataset.label + ': ' + context.parsed.y + ' pts'
                     }
                 }
             },
             scales: {
                 x: {
                     type: 'linear',
-                    title: {
-                        display: true,
-                        text: 'Gameweek',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        },
-                        stepSize: 1
-                    }
+                    title: { display: true, text: 'Gameweek' },
+                    grid: { color: '#F5F2EB' },
+                    ticks: { stepSize: 1 }
                 },
                 y: {
-                    title: {
-                        display: true,
-                        text: 'Points',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 12,
-                            weight: '600'
-                        },
-                        color: '#6B6B6B'
-                    },
-                    grid: {
-                        color: '#F5F2EB',
-                        drawBorder: false
-                    },
-                    ticks: {
-                        color: '#6B6B6B',
-                        font: {
-                            family: "'Inter', sans-serif",
-                            size: 11
-                        }
-                    }
+                    title: { display: true, text: 'Points' },
+                    grid: { color: '#F5F2EB' }
                 }
             }
         }
     });
+    
+    console.log('Form chart rendered successfully');
 }
 
-// Render team selection pills
-function renderTeamPills(containerId, chartType) {
-    const container = document.getElementById(containerId);
+// Initialize Points Distribution Chart
+function initializeDistributionChart() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    let selectedSet;
-    switch(chartType) {
-        case 'points':
-            selectedSet = VantixDashboard.selectedTeamsPoints;
-            break;
-        case 'position':
-            selectedSet = VantixDashboard.selectedTeamsPosition;
-            break;
-        case 'form':
-            selectedSet = VantixDashboard.selectedTeamsForm;
-            break;
-        default:
-            selectedSet = new Set();
+    console.log('Initializing distribution chart with teams:', selectedTeams);
+    
+    fetch(`/api/points-distribution?${queryString}`)
+        .then(response => {
+            console.log('Distribution response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Distribution data received:', data);
+            if (!data.labels || data.labels.length === 0) {
+                console.warn('No distribution data');
+                document.getElementById('distributionChart').parentElement.innerHTML = 
+                    '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="distributionChart"></canvas>';
+                return;
+            }
+            renderDistributionChart(data);
+        })
+        .catch(error => {
+            console.error('Error loading distribution:', error);
+            document.getElementById('distributionChart').parentElement.innerHTML = 
+                '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load distribution</p><canvas id="distributionChart"></canvas>';
+        });
+}
+
+// Render Points Distribution Chart
+function renderDistributionChart(data) {
+    const ctx = document.getElementById('distributionChart');
+    
+    if (!ctx) {
+        console.error('Distribution chart canvas not found');
+        return;
     }
     
-    container.innerHTML = VantixDashboard.teams.map((team, index) => {
-        const color = getTeamColor(index);
-        const isSelected = selectedSet.has(team.entry_id);
-        
-        return `
-            <div class="team-pill ${isSelected ? 'selected' : ''}" 
-                 data-team-id="${team.entry_id}"
-                 data-chart-type="${chartType}">
-                <span class="team-pill-color" style="background-color: ${color}"></span>
-                <span class="team-pill-name">${team.team_name}</span>
-            </div>
-        `;
-    }).join('');
+    if (VantixDashboard.charts.distribution) {
+        VantixDashboard.charts.distribution.destroy();
+    }
+    
+    console.log('Rendering distribution chart with', data.labels.length, 'bins');
+    
+    VantixDashboard.charts.distribution = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Gameweek Count',
+                data: data.counts,
+                backgroundColor: '#A8DADC',
+                borderColor: '#8AC4C6',
+                borderWidth: 2,
+                borderRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#FFFFFF',
+                    titleColor: '#3A3A3A',
+                    bodyColor: '#3A3A3A',
+                    borderColor: '#E8DCC4',
+                    borderWidth: 1,
+                    padding: 12,
+                    callbacks: {
+                        label: (context) => context.parsed.y + ' gameweeks'
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: 'Points Range' },
+                    grid: { display: false }
+                },
+                y: {
+                    title: { display: true, text: 'Number of Gameweeks' },
+                    grid: { color: '#F5F2EB' },
+                    ticks: { stepSize: 1 }
+                }
+            }
+        }
+    });
+    
+    console.log('Distribution chart rendered successfully');
+}
+
+// Utility function to darken colors for better visibility
+function adjustColor(color, amount) {
+    const clamp = (num) => Math.min(Math.max(num, 0), 255);
+    
+    // Convert hex to RGB
+    const hex = color.replace('#', '');
+    let r = parseInt(hex.substr(0, 2), 16);
+    let g = parseInt(hex.substr(2, 2), 16);
+    let b = parseInt(hex.substr(4, 2), 16);
+    
+    // Adjust
+    r = clamp(r + amount);
+    g = clamp(g + amount);
+    b = clamp(b + amount);
+    
+    // Convert back to hex
+    return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 }

@@ -395,11 +395,22 @@ def api_form_chart():
     """API endpoint for recent form (last 5 gameweeks)"""
     try:
         current_gw = get_current_gameweek()
-        start_gw = max(1, current_gw - 4)
+        
+        # Get the last completed gameweek (current might be in progress)
+        conn = get_db_connection()
+        last_completed = conn.execute('''
+            SELECT MAX(gameweek) as max_gw
+            FROM gameweek_points
+        ''').fetchone()
+        
+        if not last_completed or not last_completed['max_gw']:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        end_gw = last_completed['max_gw']
+        start_gw = max(1, end_gw - 4)  # Last 5 completed gameweeks
         
         selected_teams = request.args.getlist('teams')
-        
-        conn = get_db_connection()
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -414,7 +425,7 @@ def api_form_chart():
                 WHERE gp.gameweek BETWEEN ? AND ? AND t.entry_id IN ({placeholders})
                 ORDER BY gp.gameweek, t.team_name
             '''
-            params = [start_gw, current_gw] + selected_teams
+            params = [start_gw, end_gw] + selected_teams
             rows = conn.execute(query, params).fetchall()
         else:
             rows = conn.execute('''
@@ -427,7 +438,7 @@ def api_form_chart():
                 JOIN gameweek_points gp ON t.entry_id = gp.entry_id
                 WHERE gp.gameweek BETWEEN ? AND ?
                 ORDER BY gp.gameweek, t.team_name
-            ''', [start_gw, current_gw]).fetchall()
+            ''', [start_gw, end_gw]).fetchall()
         
         conn.close()
         
@@ -450,6 +461,253 @@ def api_form_chart():
         })
     except Exception as e:
         logger.error(f"Error fetching form chart: {e}")
+        return jsonify({'error': str(e), 'teams': []}), 500
+
+
+@app.route('/api/points-distribution')
+def api_points_distribution():
+    """API endpoint for points distribution across all gameweeks"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        if selected_teams:
+            placeholders = ','.join('?' * len(selected_teams))
+            query = f'''
+                SELECT points
+                FROM gameweek_points
+                WHERE entry_id IN ({placeholders})
+                ORDER BY points
+            '''
+            rows = conn.execute(query, selected_teams).fetchall()
+        else:
+            rows = conn.execute('''
+                SELECT points
+                FROM gameweek_points
+                ORDER BY points
+            ''').fetchall()
+        
+        conn.close()
+        
+        # Create histogram bins
+        points_list = [row['points'] for row in rows]
+        
+        if not points_list:
+            return jsonify({'bins': [], 'counts': []})
+        
+        # Create bins (0-20, 20-40, 40-60, 60-80, 80-100, 100+)
+        bins = [0, 20, 40, 60, 80, 100, 150]
+        counts = [0] * (len(bins) - 1)
+        
+        for points in points_list:
+            for i in range(len(bins) - 1):
+                if bins[i] <= points < bins[i + 1]:
+                    counts[i] += 1
+                    break
+            else:
+                if points >= bins[-1]:
+                    counts[-1] += 1
+        
+        bin_labels = [f"{bins[i]}-{bins[i+1]}" for i in range(len(bins) - 1)]
+        
+        return jsonify({
+            'labels': bin_labels,
+            'counts': counts
+        })
+    except Exception as e:
+        logger.error(f"Error fetching points distribution: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/team-comparison')
+def api_team_comparison():
+    """API endpoint for detailed team comparison stats"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        
+        if not selected_teams:
+            return jsonify({'teams': []})
+        
+        conn = get_db_connection()
+        
+        comparison_data = []
+        
+        for team_id in selected_teams:
+            # Get basic stats
+            team_info = conn.execute('''
+                SELECT t.team_name, t.manager_name
+                FROM teams t
+                WHERE t.entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            if not team_info:
+                continue
+            
+            # Total points
+            total_points = conn.execute('''
+                SELECT SUM(points) as total
+                FROM gameweek_points
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Average points per GW
+            avg_points = conn.execute('''
+                SELECT AVG(points) as avg
+                FROM gameweek_points
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Highest GW score
+            highest_gw = conn.execute('''
+                SELECT MAX(points) as highest
+                FROM gameweek_points
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Lowest GW score
+            lowest_gw = conn.execute('''
+                SELECT MIN(points) as lowest
+                FROM gameweek_points
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Total transfers
+            total_transfers = conn.execute('''
+                SELECT SUM(transfer_count) as total
+                FROM transfers
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Chips used
+            chips_used = conn.execute('''
+                SELECT COUNT(*) as count
+                FROM chip_usage
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            comparison_data.append({
+                'team_name': team_info['team_name'],
+                'manager_name': team_info['manager_name'],
+                'total_points': total_points['total'] if total_points['total'] else 0,
+                'avg_points': round(avg_points['avg'], 1) if avg_points['avg'] else 0,
+                'highest_gw': highest_gw['highest'] if highest_gw['highest'] else 0,
+                'lowest_gw': lowest_gw['lowest'] if lowest_gw['lowest'] else 0,
+                'total_transfers': total_transfers['total'] if total_transfers['total'] else 0,
+                'chips_used': chips_used['count'] if chips_used['count'] else 0
+            })
+        
+        conn.close()
+        
+        return jsonify({'teams': comparison_data})
+    except Exception as e:
+        logger.error(f"Error fetching team comparison: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/biggest-movers')
+def api_biggest_movers():
+    """API endpoint for biggest position changes in last 5 GWs"""
+    try:
+        current_gw = get_current_gameweek()
+        past_gw = max(1, current_gw - 5)
+        
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        # Get rankings for past_gw and current_gw
+        if selected_teams:
+            placeholders = ','.join('?' * len(selected_teams))
+            query = f'''
+                WITH past_rankings AS (
+                    SELECT 
+                        t.entry_id,
+                        t.team_name,
+                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points,
+                        RANK() OVER (ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as rank
+                    FROM teams t
+                    JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                    WHERE gp.gameweek <= ? AND t.entry_id IN ({placeholders})
+                ),
+                current_rankings AS (
+                    SELECT 
+                        t.entry_id,
+                        t.team_name,
+                        SUM(gp.points) as total_points,
+                        RANK() OVER (ORDER BY SUM(gp.points) DESC) as rank
+                    FROM teams t
+                    JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                    WHERE t.entry_id IN ({placeholders})
+                    GROUP BY t.entry_id
+                )
+                SELECT 
+                    c.team_name,
+                    c.rank as current_rank,
+                    p.rank as past_rank,
+                    (p.rank - c.rank) as change
+                FROM current_rankings c
+                LEFT JOIN past_rankings p ON c.entry_id = p.entry_id
+                ORDER BY change DESC
+            '''
+            params = [past_gw] + selected_teams + selected_teams
+            rows = conn.execute(query, params).fetchall()
+        else:
+            rows = conn.execute('''
+                WITH past_rankings AS (
+                    SELECT 
+                        t.entry_id,
+                        t.team_name,
+                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points,
+                        RANK() OVER (ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as rank
+                    FROM teams t
+                    JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                    WHERE gp.gameweek <= ?
+                ),
+                current_rankings AS (
+                    SELECT 
+                        t.entry_id,
+                        t.team_name,
+                        SUM(gp.points) as total_points,
+                        RANK() OVER (ORDER BY SUM(gp.points) DESC) as rank
+                    FROM teams t
+                    JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                    GROUP BY t.entry_id
+                )
+                SELECT 
+                    c.team_name,
+                    c.rank as current_rank,
+                    p.rank as past_rank,
+                    (p.rank - c.rank) as change
+                FROM current_rankings c
+                LEFT JOIN past_rankings p ON c.entry_id = p.entry_id
+                ORDER BY change DESC
+            ''', [past_gw]).fetchall()
+        
+        conn.close()
+        
+        climbers = []
+        fallers = []
+        
+        for row in rows:
+            mover = {
+                'team_name': row['team_name'],
+                'change': abs(row['change']) if row['change'] else 0,
+                'current_rank': row['current_rank'],
+                'past_rank': row['past_rank']
+            }
+            
+            if row['change'] > 0:
+                climbers.append(mover)
+            elif row['change'] < 0:
+                fallers.append(mover)
+        
+        return jsonify({
+            'climbers': climbers[:5],  # Top 5 climbers
+            'fallers': fallers[:5]  # Top 5 fallers
+        })
+    except Exception as e:
+        logger.error(f"Error fetching biggest movers: {e}")
         return jsonify({'error': str(e)}), 500
 
 

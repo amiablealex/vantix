@@ -26,6 +26,20 @@
         </div>
     </header>
 
+    <!-- Master Team Filter -->
+    <section class="master-filter">
+        <div class="filter-header">
+            <div class="filter-title">Filter Teams</div>
+            <div class="filter-actions">
+                <button class="btn-filter" id="selectAllMaster">Select All</button>
+                <button class="btn-filter" id="deselectAllMaster">Deselect All</button>
+            </div>
+        </div>
+        <div class="team-pills-master" id="masterTeamPills">
+            <!-- Team pills will be dynamically generated -->
+        </div>
+    </section>
+
     <!-- Stats Cards -->
     <div class="stats-grid">
         <div class="stat-card">
@@ -59,63 +73,16 @@
         <div class="chart-container">
             <canvas id="cumulativePointsChart"></canvas>
         </div>
-        <div class="team-selector">
-            <div class="selector-header">
-                <div class="selector-title">Filter Teams</div>
-                <div class="selector-actions">
-                    <button class="btn-text" data-action="selectAll" data-chart="points">Select All</button>
-                    <button class="btn-text" data-action="deselectAll" data-chart="points">Deselect All</button>
-                </div>
-            </div>
-            <div class="team-pills" id="teamPillsPoints">
-                <!-- Team pills will be dynamically generated -->
-            </div>
-        </div>
     </section>
 
     <!-- League Position Worm Chart -->
     <section class="chart-section">
         <div class="chart-header">
             <h2 class="chart-title">League Position Tracker</h2>
-            <p class="chart-description">Watch rank changes with chip usage markers</p>
+            <p class="chart-description">Watch rank changes with chip usage markers (★)</p>
         </div>
         <div class="chart-container">
             <canvas id="leaguePositionChart"></canvas>
-        </div>
-        <div class="team-selector">
-            <div class="selector-header">
-                <div class="selector-title">Filter Teams</div>
-                <div class="selector-actions">
-                    <button class="btn-text" data-action="selectAll" data-chart="position">Select All</button>
-                    <button class="btn-text" data-action="deselectAll" data-chart="position">Deselect All</button>
-                </div>
-            </div>
-            <div class="team-pills" id="teamPillsPosition">
-                <!-- Team pills will be dynamically generated -->
-            </div>
-        </div>
-    </section>
-
-    <!-- Recent Form Chart (Last 5 GWs) -->
-    <section class="chart-section">
-        <div class="chart-header">
-            <h2 class="chart-title">Recent Form</h2>
-            <p class="chart-description">Points scored in the last 5 gameweeks</p>
-        </div>
-        <div class="chart-container">
-            <canvas id="formChart"></canvas>
-        </div>
-        <div class="team-selector">
-            <div class="selector-header">
-                <div class="selector-title">Filter Teams</div>
-                <div class="selector-actions">
-                    <button class="btn-text" data-action="selectAll" data-chart="form">Select All</button>
-                    <button class="btn-text" data-action="deselectAll" data-chart="form">Deselect All</button>
-                </div>
-            </div>
-            <div class="team-pills" id="teamPillsForm">
-                <!-- Team pills will be dynamically generated -->
-            </div>
         </div>
     </section>
 
@@ -129,6 +96,56 @@
             <div class="loading">
                 <div class="loading-spinner"></div>
                 <p>Loading transfers...</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Recent Form Chart -->
+    <section class="chart-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Recent Form</h2>
+            <p class="chart-description">Points scored in the last 5 gameweeks</p>
+        </div>
+        <div class="chart-container">
+            <canvas id="formChart"></canvas>
+        </div>
+    </section>
+
+    <!-- Points Distribution -->
+    <section class="chart-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Points Distribution</h2>
+            <p class="chart-description">How gameweek scores are spread across the league</p>
+        </div>
+        <div class="chart-container">
+            <canvas id="distributionChart"></canvas>
+        </div>
+    </section>
+
+    <!-- Head-to-Head Comparison -->
+    <section class="stats-comparison">
+        <div class="chart-header">
+            <h2 class="chart-title">Team Comparison</h2>
+            <p class="chart-description">Detailed stats for selected teams</p>
+        </div>
+        <div class="comparison-grid" id="comparisonGrid">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading comparison...</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Biggest Movers -->
+    <section class="movers-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Biggest Movers (Last 5 GWs)</h2>
+            <p class="chart-description">Who's climbing and who's falling?</p>
+        </div>
+        <div class="movers-grid" id="moversGrid">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading movers...</p>
             </div>
         </div>
     </section>
