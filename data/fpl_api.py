@@ -22,6 +22,7 @@ class FPLDataCollector:
         self.league_id = league_id
         self.session = requests.Session()
         self.player_map = {}  # Cache for player ID to name mapping
+        self.current_season_start_gw = 1  # FPL seasons always start at GW1
         
     def _make_request(self, url):
         """Make API request with rate limiting and error handling"""
@@ -59,6 +60,18 @@ class FPLDataCollector:
         url = f"{self.BASE_URL}/entry/{entry_id}/transfers/"
         return self._make_request(url)
     
+    def get_current_gameweek(self, bootstrap):
+        """Determine the current active gameweek"""
+        events = bootstrap['events']
+        
+        # Find the first gameweek that is either in progress or not finished
+        for event in events:
+            if not event['finished']:
+                return event['id']
+        
+        # If all gameweeks are finished, return the last one
+        return events[-1]['id'] if events else 1
+    
     def collect_all_data(self):
         """Main method to collect all FPL data and store in database"""
         logger.info("Starting data collection...")
@@ -71,9 +84,19 @@ class FPLDataCollector:
             logger.info("Fetching bootstrap data...")
             bootstrap = self.get_bootstrap_data()
             
-            # Build player map
+            # Determine current gameweek
+            current_gw = self.get_current_gameweek(bootstrap)
+            logger.info(f"Current gameweek: {current_gw}")
+            
+            # Build player map with current stats
+            player_stats_map = {}
             for player in bootstrap['elements']:
                 self.player_map[player['id']] = player['web_name']
+                player_stats_map[player['id']] = {
+                    'goals': player.get('goals_scored', 0),
+                    'assists': player.get('assists', 0),
+                    'clean_sheets': player.get('clean_sheets', 0)
+                }
             
             # Store gameweeks
             for event in bootstrap['events']:
@@ -173,29 +196,23 @@ class FPLDataCollector:
                             ','.join(data['out'])
                         ))
                     
-                    # Calculate player stats (goals, assists, clean sheets)
+                    # Calculate player stats for this manager's current squad
                     total_goals = 0
                     total_assists = 0
                     total_clean_sheets = 0
                     
-                    # Get current gameweek for latest picks
-                    current_gw = max([gw['event'] for gw in history['current']]) if history['current'] else 1
-                    
-                    for gw in range(1, current_gw + 1):
-                        try:
-                            picks = self.get_entry_picks(entry_id, gw)
-                            for pick in picks['picks']:
-                                player_id = pick['element']
-                                # Find player in bootstrap data
-                                for player in bootstrap['elements']:
-                                    if player['id'] == player_id:
-                                        total_goals += player.get('goals_scored', 0)
-                                        total_assists += player.get('assists', 0)
-                                        total_clean_sheets += player.get('clean_sheets', 0)
-                                        break
-                        except Exception as e:
-                            logger.warning(f"Could not fetch picks for GW {gw}: {e}")
-                            continue
+                    # Get current gameweek picks to see what players they have
+                    try:
+                        picks = self.get_entry_picks(entry_id, current_gw)
+                        for pick in picks['picks']:
+                            player_id = pick['element']
+                            if player_id in player_stats_map:
+                                stats = player_stats_map[player_id]
+                                total_goals += stats['goals']
+                                total_assists += stats['assists']
+                                total_clean_sheets += stats['clean_sheets']
+                    except Exception as e:
+                        logger.warning(f"Could not fetch picks for current GW: {e}")
                     
                     cursor.execute('''
                         INSERT OR REPLACE INTO player_stats 

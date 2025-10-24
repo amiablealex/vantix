@@ -173,6 +173,12 @@ function renderLeaguePositionChart(teamsData) {
         VantixDashboard.charts.position.destroy();
     }
     
+    if (!teamsData || teamsData.length === 0) {
+        // Show "no data" message
+        ctx.parentElement.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. Please select teams.</p><canvas id="leaguePositionChart"></canvas>';
+        return;
+    }
+    
     // Prepare datasets
     const datasets = teamsData.map((team, index) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
@@ -315,12 +321,170 @@ function renderLeaguePositionChart(teamsData) {
     });
 }
 
+// Initialize Form Chart (Last 5 GWs)
+function initializeFormChart() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeamsForm);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/form-chart?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            renderFormChart(data.teams);
+            renderTeamPills('teamPillsForm', 'form');
+        })
+        .catch(error => {
+            console.error('Error loading form chart:', error);
+        });
+}
+
+// Render Form Chart
+function renderFormChart(teamsData) {
+    const ctx = document.getElementById('formChart');
+    
+    // Destroy existing chart if it exists
+    if (VantixDashboard.charts.form) {
+        VantixDashboard.charts.form.destroy();
+    }
+    
+    // Prepare datasets
+    const datasets = teamsData.map((team, index) => {
+        const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
+        const teamIndex = VantixDashboard.teams.indexOf(teamInfo);
+        const color = getTeamColor(teamIndex);
+        
+        return {
+            label: team.team_name,
+            data: team.data,
+            borderColor: color,
+            backgroundColor: color + '40',
+            borderWidth: 2,
+            tension: 0.4,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            pointBackgroundColor: color,
+            pointBorderColor: '#FFFFFF',
+            pointBorderWidth: 2,
+            fill: true
+        };
+    });
+    
+    // Create chart
+    VantixDashboard.charts.form = new Chart(ctx, {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: '#FFFFFF',
+                    titleColor: '#3A3A3A',
+                    bodyColor: '#3A3A3A',
+                    borderColor: '#E8DCC4',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: true,
+                    boxWidth: 12,
+                    boxHeight: 12,
+                    boxPadding: 4,
+                    titleFont: {
+                        family: "'Inter', sans-serif",
+                        size: 13,
+                        weight: '600'
+                    },
+                    bodyFont: {
+                        family: "'Inter', sans-serif",
+                        size: 12
+                    },
+                    callbacks: {
+                        title: function(context) {
+                            return 'Gameweek ' + context[0].parsed.x;
+                        },
+                        label: function(context) {
+                            return context.dataset.label + ': ' + context.parsed.y + ' pts';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: {
+                        display: true,
+                        text: 'Gameweek',
+                        font: {
+                            family: "'Inter', sans-serif",
+                            size: 12,
+                            weight: '600'
+                        },
+                        color: '#6B6B6B'
+                    },
+                    grid: {
+                        color: '#F5F2EB',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#6B6B6B',
+                        font: {
+                            family: "'Inter', sans-serif",
+                            size: 11
+                        },
+                        stepSize: 1
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Points',
+                        font: {
+                            family: "'Inter', sans-serif",
+                            size: 12,
+                            weight: '600'
+                        },
+                        color: '#6B6B6B'
+                    },
+                    grid: {
+                        color: '#F5F2EB',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: '#6B6B6B',
+                        font: {
+                            family: "'Inter', sans-serif",
+                            size: 11
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 // Render team selection pills
 function renderTeamPills(containerId, chartType) {
     const container = document.getElementById(containerId);
-    const selectedSet = chartType === 'points' ? 
-        VantixDashboard.selectedTeamsPoints : 
-        VantixDashboard.selectedTeamsPosition;
+    
+    let selectedSet;
+    switch(chartType) {
+        case 'points':
+            selectedSet = VantixDashboard.selectedTeamsPoints;
+            break;
+        case 'position':
+            selectedSet = VantixDashboard.selectedTeamsPosition;
+            break;
+        case 'form':
+            selectedSet = VantixDashboard.selectedTeamsForm;
+            break;
+        default:
+            selectedSet = new Set();
+    }
     
     container.innerHTML = VantixDashboard.teams.map((team, index) => {
         const color = getTeamColor(index);

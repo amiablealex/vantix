@@ -34,6 +34,33 @@ fpl_collector = FPLDataCollector(
 )
 
 
+def get_current_gameweek():
+    """Get the current active gameweek"""
+    conn = get_db_connection()
+    # Find first unfinished gameweek
+    current = conn.execute(
+        'SELECT id FROM gameweeks WHERE finished = 0 ORDER BY id LIMIT 1'
+    ).fetchone()
+    
+    if not current:
+        # All finished, get last gameweek
+        current = conn.execute(
+            'SELECT id FROM gameweeks ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+    
+    conn.close()
+    return current['id'] if current else 1
+
+
+def get_season_string():
+    """Get current FPL season string (e.g., '2024/25')"""
+    now = datetime.now()
+    if now.month >= 8:  # Season starts in August
+        return f"{now.year}/{str(now.year + 1)[-2:]}"
+    else:
+        return f"{now.year - 1}/{str(now.year)[-2:]}"
+
+
 @app.route('/')
 def index():
     """Main dashboard view"""
@@ -41,9 +68,7 @@ def index():
         conn = get_db_connection()
         
         # Get current gameweek
-        current_gw = conn.execute(
-            'SELECT id, deadline, finished FROM gameweeks ORDER BY id DESC LIMIT 1'
-        ).fetchone()
+        current_gw = get_current_gameweek()
         
         # Get league teams
         teams = conn.execute(
@@ -59,7 +84,8 @@ def index():
         
         return render_template(
             'dashboard.html',
-            current_gameweek=current_gw['id'] if current_gw else 1,
+            current_gameweek=current_gw,
+            season=get_season_string(),
             teams=[dict(t) for t in teams],
             last_update=last_update['last_update'] if last_update else None,
             league_name=config.LEAGUE_NAME
@@ -138,33 +164,49 @@ def api_league_positions():
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
             query = f'''
-                WITH ranked_teams AS (
+                WITH cumulative_points AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
                         gp.gameweek,
-                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as cumulative_points,
-                        RANK() OVER (PARTITION BY gp.gameweek ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as position
+                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
                     WHERE t.entry_id IN ({placeholders})
+                ),
+                ranked AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        gameweek,
+                        total_points,
+                        RANK() OVER (PARTITION BY gameweek ORDER BY total_points DESC) as position
+                    FROM cumulative_points
                 )
-                SELECT * FROM ranked_teams ORDER BY gameweek, position
+                SELECT * FROM ranked ORDER BY gameweek, position
             '''
             rows = conn.execute(query, selected_teams).fetchall()
         else:
             rows = conn.execute('''
-                WITH ranked_teams AS (
+                WITH cumulative_points AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
                         gp.gameweek,
-                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as cumulative_points,
-                        RANK() OVER (PARTITION BY gp.gameweek ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as position
+                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                ),
+                ranked AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        gameweek,
+                        total_points,
+                        RANK() OVER (PARTITION BY gameweek ORDER BY total_points DESC) as position
+                    FROM cumulative_points
                 )
-                SELECT * FROM ranked_teams ORDER BY gameweek, position
+                SELECT * FROM ranked ORDER BY gameweek, position
             ''').fetchall()
         
         # Get chip usage
@@ -219,16 +261,9 @@ def api_recent_transfers():
     """API endpoint for recent transfers"""
     try:
         selected_teams = request.args.getlist('teams')
+        current_gw = get_current_gameweek()
         
         conn = get_db_connection()
-        
-        # Get current gameweek
-        current_gw = conn.execute(
-            'SELECT id FROM gameweeks ORDER BY id DESC LIMIT 1'
-        ).fetchone()
-        
-        if not current_gw:
-            return jsonify({'transfers': []})
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -244,7 +279,7 @@ def api_recent_transfers():
                 WHERE t.entry_id IN ({placeholders})
                 ORDER BY t.team_name
             '''
-            params = [current_gw['id']] + selected_teams
+            params = [current_gw] + selected_teams
             rows = conn.execute(query, params).fetchall()
         else:
             rows = conn.execute('''
@@ -257,7 +292,7 @@ def api_recent_transfers():
                 FROM teams t
                 LEFT JOIN transfers tr ON t.entry_id = tr.entry_id AND tr.gameweek = ?
                 ORDER BY t.team_name
-            ''', [current_gw['id']]).fetchall()
+            ''', [current_gw]).fetchall()
         
         conn.close()
         
@@ -278,7 +313,7 @@ def api_recent_transfers():
                     'count': 0
                 })
         
-        return jsonify({'transfers': transfers})
+        return jsonify({'transfers': transfers, 'gameweek': current_gw})
     except Exception as e:
         logger.error(f"Error fetching recent transfers: {e}")
         return jsonify({'error': str(e)}), 500
@@ -352,6 +387,69 @@ def api_stats():
         })
     except Exception as e:
         logger.error(f"Error fetching stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/form-chart')
+def api_form_chart():
+    """API endpoint for recent form (last 5 gameweeks)"""
+    try:
+        current_gw = get_current_gameweek()
+        start_gw = max(1, current_gw - 4)
+        
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        if selected_teams:
+            placeholders = ','.join('?' * len(selected_teams))
+            query = f'''
+                SELECT 
+                    t.entry_id,
+                    t.team_name,
+                    gp.gameweek,
+                    gp.points
+                FROM teams t
+                JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                WHERE gp.gameweek BETWEEN ? AND ? AND t.entry_id IN ({placeholders})
+                ORDER BY gp.gameweek, t.team_name
+            '''
+            params = [start_gw, current_gw] + selected_teams
+            rows = conn.execute(query, params).fetchall()
+        else:
+            rows = conn.execute('''
+                SELECT 
+                    t.entry_id,
+                    t.team_name,
+                    gp.gameweek,
+                    gp.points
+                FROM teams t
+                JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                WHERE gp.gameweek BETWEEN ? AND ?
+                ORDER BY gp.gameweek, t.team_name
+            ''', [start_gw, current_gw]).fetchall()
+        
+        conn.close()
+        
+        # Transform data
+        teams_data = {}
+        for row in rows:
+            entry_id = row['entry_id']
+            if entry_id not in teams_data:
+                teams_data[entry_id] = {
+                    'team_name': row['team_name'],
+                    'data': []
+                }
+            teams_data[entry_id]['data'].append({
+                'x': row['gameweek'],
+                'y': row['points']
+            })
+        
+        return jsonify({
+            'teams': list(teams_data.values())
+        })
+    except Exception as e:
+        logger.error(f"Error fetching form chart: {e}")
         return jsonify({'error': str(e)}), 500
 
 

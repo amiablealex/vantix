@@ -8,6 +8,7 @@ window.VantixDashboard = {
     teams: [],
     selectedTeamsPoints: new Set(),
     selectedTeamsPosition: new Set(),
+    selectedTeamsForm: new Set(),
     colors: [
         '#A8DADC', // Powder blue
         '#F1C6B7', // Dusty pink
@@ -22,7 +23,8 @@ window.VantixDashboard = {
     ],
     charts: {
         points: null,
-        position: null
+        position: null,
+        form: null
     }
 };
 
@@ -38,6 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
         VantixDashboard.teams.forEach(team => {
             VantixDashboard.selectedTeamsPoints.add(team.entry_id);
             VantixDashboard.selectedTeamsPosition.add(team.entry_id);
+            VantixDashboard.selectedTeamsForm.add(team.entry_id);
         });
         
         // Initialize components
@@ -87,6 +90,9 @@ function initializeCharts() {
     
     // Initialize league position chart
     initializeLeaguePositionChart();
+    
+    // Initialize form chart
+    initializeFormChart();
 }
 
 // Load and display transfers
@@ -97,6 +103,10 @@ function initializeTransfers() {
     fetch(`/api/recent-transfers?${queryString}`)
         .then(response => response.json())
         .then(data => {
+            // Update gameweek display
+            if (data.gameweek) {
+                document.getElementById('transfersGameweek').textContent = `GW ${data.gameweek}`;
+            }
             displayTransfers(data.transfers);
         })
         .catch(error => {

@@ -10,7 +10,7 @@
             <div class="brand">
                 <div>
                     <div class="brand-logo">Vantix</div>
-                    <div class="brand-subtitle">{{ league_name }}</div>
+                    <div class="brand-subtitle">{{ league_name }} • {{ season }} Season</div>
                 </div>
             </div>
             <div class="header-meta">
@@ -63,8 +63,8 @@
             <div class="selector-header">
                 <div class="selector-title">Filter Teams</div>
                 <div class="selector-actions">
-                    <button class="btn-text" id="selectAllTeams">Select All</button>
-                    <button class="btn-text" id="deselectAllTeams">Deselect All</button>
+                    <button class="btn-text" data-action="selectAll" data-chart="points">Select All</button>
+                    <button class="btn-text" data-action="deselectAll" data-chart="points">Deselect All</button>
                 </div>
             </div>
             <div class="team-pills" id="teamPillsPoints">
@@ -86,8 +86,8 @@
             <div class="selector-header">
                 <div class="selector-title">Filter Teams</div>
                 <div class="selector-actions">
-                    <button class="btn-text" id="selectAllTeamsPosition">Select All</button>
-                    <button class="btn-text" id="deselectAllTeamsPosition">Deselect All</button>
+                    <button class="btn-text" data-action="selectAll" data-chart="position">Select All</button>
+                    <button class="btn-text" data-action="deselectAll" data-chart="position">Deselect All</button>
                 </div>
             </div>
             <div class="team-pills" id="teamPillsPosition">
@@ -96,10 +96,33 @@
         </div>
     </section>
 
+    <!-- Recent Form Chart (Last 5 GWs) -->
+    <section class="chart-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Recent Form</h2>
+            <p class="chart-description">Points scored in the last 5 gameweeks</p>
+        </div>
+        <div class="chart-container">
+            <canvas id="formChart"></canvas>
+        </div>
+        <div class="team-selector">
+            <div class="selector-header">
+                <div class="selector-title">Filter Teams</div>
+                <div class="selector-actions">
+                    <button class="btn-text" data-action="selectAll" data-chart="form">Select All</button>
+                    <button class="btn-text" data-action="deselectAll" data-chart="form">Deselect All</button>
+                </div>
+            </div>
+            <div class="team-pills" id="teamPillsForm">
+                <!-- Team pills will be dynamically generated -->
+            </div>
+        </div>
+    </section>
+
     <!-- Recent Transfers -->
     <section class="transfers-section">
         <div class="chart-header">
-            <h2 class="chart-title">Recent Transfers (GW {{ current_gameweek }})</h2>
+            <h2 class="chart-title">Recent Transfers (<span id="transfersGameweek">GW {{ current_gameweek }}</span>)</h2>
             <p class="chart-description">Latest squad changes by selected teams</p>
         </div>
         <div class="transfers-list" id="transfersList">
