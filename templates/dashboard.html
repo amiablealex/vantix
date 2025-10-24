@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}{{ league_name }} - Vantix{% endblock %}
+
+{% block content %}
+<div class="app-container">
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="brand">
+                <div>
+                    <div class="brand-logo">Vantix</div>
+                    <div class="brand-subtitle">{{ league_name }}</div>
+                </div>
+            </div>
+            <div class="header-meta">
+                <div class="current-gameweek">
+                    Current Gameweek: <span>GW {{ current_gameweek }}</span>
+                </div>
+                {% if last_update %}
+                <div class="last-updated">
+                    Last updated: {{ last_update }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Current Leader</div>
+            <div class="stat-value" id="stat-leader-value">-</div>
+            <div class="stat-detail" id="stat-leader-detail">Loading...</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Most Goals</div>
+            <div class="stat-value" id="stat-goals-value">-</div>
+            <div class="stat-detail" id="stat-goals-detail">Loading...</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Most Clean Sheets</div>
+            <div class="stat-value" id="stat-cs-value">-</div>
+            <div class="stat-detail" id="stat-cs-detail">Loading...</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Highest GW Score</div>
+            <div class="stat-value" id="stat-highest-value">-</div>
+            <div class="stat-detail" id="stat-highest-detail">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Cumulative Points Chart -->
+    <section class="chart-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Cumulative Points</h2>
+            <p class="chart-description">Track total points progression throughout the season</p>
+        </div>
+        <div class="chart-container">
+            <canvas id="cumulativePointsChart"></canvas>
+        </div>
+        <div class="team-selector">
+            <div class="selector-header">
+                <div class="selector-title">Filter Teams</div>
+                <div class="selector-actions">
+                    <button class="btn-text" id="selectAllTeams">Select All</button>
+                    <button class="btn-text" id="deselectAllTeams">Deselect All</button>
+                </div>
+            </div>
+            <div class="team-pills" id="teamPillsPoints">
+                <!-- Team pills will be dynamically generated -->
+            </div>
+        </div>
+    </section>
+
+    <!-- League Position Worm Chart -->
+    <section class="chart-section">
+        <div class="chart-header">
+            <h2 class="chart-title">League Position Tracker</h2>
+            <p class="chart-description">Watch rank changes with chip usage markers</p>
+        </div>
+        <div class="chart-container">
+            <canvas id="leaguePositionChart"></canvas>
+        </div>
+        <div class="team-selector">
+            <div class="selector-header">
+                <div class="selector-title">Filter Teams</div>
+                <div class="selector-actions">
+                    <button class="btn-text" id="selectAllTeamsPosition">Select All</button>
+                    <button class="btn-text" id="deselectAllTeamsPosition">Deselect All</button>
+                </div>
+            </div>
+            <div class="team-pills" id="teamPillsPosition">
+                <!-- Team pills will be dynamically generated -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Recent Transfers -->
+    <section class="transfers-section">
+        <div class="chart-header">
+            <h2 class="chart-title">Recent Transfers (GW {{ current_gameweek }})</h2>
+            <p class="chart-description">Latest squad changes by selected teams</p>
+        </div>
+        <div class="transfers-list" id="transfersList">
+            <div class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading transfers...</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Refresh Button -->
+    <button class="refresh-button" id="refreshButton" title="Refresh data">
+        ↻
+    </button>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>Powered by Fantasy Premier League API</p>
+    </footer>
+</div>
+
+<!-- Pass data to JavaScript -->
+<script>
+    window.FPL_DATA = {
+        teams: {{ teams | tojson }},
+        currentGameweek: {{ current_gameweek }}
+    };
+</script>
+{% endblock %}
