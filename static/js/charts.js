@@ -126,7 +126,7 @@ function renderLeaguePositionChart(teamsData) {
         });
         
         const pointRadii = team.data.map(point => {
-            return team.chips.find(c => c.gameweek === point.x) ? 12 : 0;  // Much larger!
+            return team.chips.find(c => c.gameweek === point.x) ? 12 : 0;
         });
         
         // Use SOLID DARK colors for chip markers
@@ -217,16 +217,16 @@ function initializeFormChart() {
             console.log('Form chart data received:', data);
             if (!data.teams || data.teams.length === 0) {
                 console.warn('No teams data in form chart response');
-                document.getElementById('formChart').parentElement.innerHTML = 
-                    '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. You may need to play more gameweeks.</p><canvas id="formChart"></canvas>';
+                const container = document.getElementById('formChart').parentElement;
+                container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. You may need to play more gameweeks.</p><canvas id="formChart"></canvas>';
                 return;
             }
             renderFormChart(data.teams);
         })
         .catch(error => {
             console.error('Error loading form chart:', error);
-            document.getElementById('formChart').parentElement.innerHTML = 
-                '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load form data</p><canvas id="formChart"></canvas>';
+            const container = document.getElementById('formChart').parentElement;
+            container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load form data</p><canvas id="formChart"></canvas>';
         });
 }
 
@@ -333,16 +333,16 @@ function initializeDistributionChart() {
             console.log('Distribution data received:', data);
             if (!data.labels || data.labels.length === 0) {
                 console.warn('No distribution data');
-                document.getElementById('distributionChart').parentElement.innerHTML = 
-                    '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="distributionChart"></canvas>';
+                const container = document.getElementById('distributionChart').parentElement;
+                container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="distributionChart"></canvas>';
                 return;
             }
             renderDistributionChart(data);
         })
         .catch(error => {
             console.error('Error loading distribution:', error);
-            document.getElementById('distributionChart').parentElement.innerHTML = 
-                '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load distribution</p><canvas id="distributionChart"></canvas>';
+            const container = document.getElementById('distributionChart').parentElement;
+            container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load distribution</p><canvas id="distributionChart"></canvas>';
         });
 }
 
@@ -406,23 +406,4 @@ function renderDistributionChart(data) {
     });
     
     console.log('Distribution chart rendered successfully');
-}
-
-// Utility function to darken colors for better visibility
-function adjustColor(color, amount) {
-    const clamp = (num) => Math.min(Math.max(num, 0), 255);
-    
-    // Convert hex to RGB
-    const hex = color.replace('#', '');
-    let r = parseInt(hex.substr(0, 2), 16);
-    let g = parseInt(hex.substr(2, 2), 16);
-    let b = parseInt(hex.substr(4, 2), 16);
-    
-    // Adjust
-    r = clamp(r + amount);
-    g = clamp(g + amount);
-    b = clamp(b + amount);
-    
-    // Convert back to hex
-    return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
