@@ -1,12 +1,14 @@
 /**
  * Vantix Dashboard - Charts
- * Chart.js implementations with master filter integration
+ * CLEAN VERSION - NO renderTeamPills function
  */
 
 // Initialize Cumulative Points Chart
 function initializeCumulativePointsChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    console.log('Loading cumulative points for teams:', selectedTeams);
     
     fetch(`/api/cumulative-points?${queryString}`)
         .then(response => response.json())
@@ -86,12 +88,16 @@ function renderCumulativePointsChart(teamsData) {
             }
         }
     });
+    
+    console.log('Cumulative points chart rendered');
 }
 
 // Initialize League Position Chart
 function initializeLeaguePositionChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    console.log('Loading league positions for teams:', selectedTeams);
     
     fetch(`/api/league-positions?${queryString}`)
         .then(response => response.json())
@@ -103,7 +109,7 @@ function initializeLeaguePositionChart() {
         });
 }
 
-// Render League Position Chart with VERY VISIBLE chip markers
+// Render League Position Chart with DARK VISIBLE chip markers
 function renderLeaguePositionChart(teamsData) {
     const ctx = document.getElementById('leaguePositionChart');
     
@@ -112,7 +118,7 @@ function renderLeaguePositionChart(teamsData) {
     }
     
     if (!teamsData || teamsData.length === 0) {
-        ctx.parentElement.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="leaguePositionChart"></canvas>';
+        console.warn('No position data to display');
         return;
     }
     
@@ -129,22 +135,22 @@ function renderLeaguePositionChart(teamsData) {
             return team.chips.find(c => c.gameweek === point.x) ? 12 : 0;
         });
         
-        // Use SOLID DARK colors for chip markers
-        const chipColor = '#1A1A1A';  // Very dark, almost black
+        // SOLID BLACK for chip markers
+        const chipColor = '#000000';
         
         return {
             label: team.team_name,
             data: team.data,
             borderColor: color,
-            backgroundColor: chipColor,  // Dark solid color for stars
+            backgroundColor: chipColor,
             borderWidth: 3,
             tension: 0.3,
             pointStyle: pointStyles,
             pointRadius: pointRadii,
             pointHoverRadius: 14,
-            pointBackgroundColor: chipColor,  // Dark fill
-            pointBorderColor: color,  // Team color border for contrast
-            pointBorderWidth: 3
+            pointBackgroundColor: chipColor,
+            pointBorderColor: '#FFFFFF',
+            pointBorderWidth: 4
         };
     });
     
@@ -195,6 +201,8 @@ function renderLeaguePositionChart(teamsData) {
             }
         }
     });
+    
+    console.log('League position chart rendered');
 }
 
 // Initialize Form Chart
@@ -202,31 +210,28 @@ function initializeFormChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    console.log('Initializing form chart with teams:', selectedTeams);
-    console.log('Query string:', queryString);
+    console.log('Loading form chart for teams:', selectedTeams);
     
     fetch(`/api/form-chart?${queryString}`)
         .then(response => {
-            console.log('Form chart response status:', response.status);
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error(`HTTP ${response.status}`);
             }
             return response.json();
         })
         .then(data => {
-            console.log('Form chart data received:', data);
+            console.log('Form data received:', data);
             if (!data.teams || data.teams.length === 0) {
-                console.warn('No teams data in form chart response');
                 const container = document.getElementById('formChart').parentElement;
-                container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available. You may need to play more gameweeks.</p><canvas id="formChart"></canvas>';
+                container.innerHTML = '<p style="text-align: center; color: #9B9B9B; padding: 40px;">No form data available yet.</p><canvas id="formChart"></canvas>';
                 return;
             }
             renderFormChart(data.teams);
         })
         .catch(error => {
-            console.error('Error loading form chart:', error);
+            console.error('Form chart error:', error);
             const container = document.getElementById('formChart').parentElement;
-            container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load form data</p><canvas id="formChart"></canvas>';
+            container.innerHTML = '<p style="text-align: center; color: #9B9B9B; padding: 40px;">Unable to load form data.</p><canvas id="formChart"></canvas>';
         });
 }
 
@@ -235,20 +240,13 @@ function renderFormChart(teamsData) {
     const ctx = document.getElementById('formChart');
     
     if (!ctx) {
-        console.error('Form chart canvas not found');
+        console.error('Form chart canvas missing');
         return;
     }
     
     if (VantixDashboard.charts.form) {
         VantixDashboard.charts.form.destroy();
     }
-    
-    if (!teamsData || teamsData.length === 0) {
-        console.warn('No teams data to render in form chart');
-        return;
-    }
-    
-    console.log('Rendering form chart with', teamsData.length, 'teams');
     
     const datasets = teamsData.map((team) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
@@ -319,30 +317,28 @@ function initializeDistributionChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    console.log('Initializing distribution chart with teams:', selectedTeams);
+    console.log('Loading distribution for teams:', selectedTeams);
     
     fetch(`/api/points-distribution?${queryString}`)
         .then(response => {
-            console.log('Distribution response status:', response.status);
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error(`HTTP ${response.status}`);
             }
             return response.json();
         })
         .then(data => {
             console.log('Distribution data received:', data);
             if (!data.labels || data.labels.length === 0) {
-                console.warn('No distribution data');
                 const container = document.getElementById('distributionChart').parentElement;
-                container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">No data available</p><canvas id="distributionChart"></canvas>';
+                container.innerHTML = '<p style="text-align: center; color: #9B9B9B; padding: 40px;">No distribution data available.</p><canvas id="distributionChart"></canvas>';
                 return;
             }
             renderDistributionChart(data);
         })
         .catch(error => {
-            console.error('Error loading distribution:', error);
+            console.error('Distribution error:', error);
             const container = document.getElementById('distributionChart').parentElement;
-            container.innerHTML = '<p style="text-align: center; color: var(--color-text-lighter); padding: 40px;">Failed to load distribution</p><canvas id="distributionChart"></canvas>';
+            container.innerHTML = '<p style="text-align: center; color: #9B9B9B; padding: 40px;">Unable to load distribution.</p><canvas id="distributionChart"></canvas>';
         });
 }
 
@@ -351,15 +347,13 @@ function renderDistributionChart(data) {
     const ctx = document.getElementById('distributionChart');
     
     if (!ctx) {
-        console.error('Distribution chart canvas not found');
+        console.error('Distribution chart canvas missing');
         return;
     }
     
     if (VantixDashboard.charts.distribution) {
         VantixDashboard.charts.distribution.destroy();
     }
-    
-    console.log('Rendering distribution chart with', data.labels.length, 'bins');
     
     VantixDashboard.charts.distribution = new Chart(ctx, {
         type: 'bar',
