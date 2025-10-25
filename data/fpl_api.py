@@ -22,6 +22,7 @@ class FPLDataCollector:
         self.league_id = league_id
         self.session = requests.Session()
         self.player_map = {}  # Cache for player ID to name mapping
+        self.player_details = {}  # Cache for full player details
         self.current_season_start_gw = 1  # FPL seasons always start at GW1
         
     def _make_request(self, url):
@@ -88,14 +89,13 @@ class FPLDataCollector:
             current_gw = self.get_current_gameweek(bootstrap)
             logger.info(f"Current gameweek: {current_gw}")
             
-            # Build player map with current stats
-            player_stats_map = {}
+            # Build player maps with full details
             for player in bootstrap['elements']:
                 self.player_map[player['id']] = player['web_name']
-                player_stats_map[player['id']] = {
-                    'goals': player.get('goals_scored', 0),
-                    'assists': player.get('assists', 0),
-                    'clean_sheets': player.get('clean_sheets', 0)
+                self.player_details[player['id']] = {
+                    'name': player['web_name'],
+                    'position': player['element_type'],  # 1=GK, 2=DEF, 3=MID, 4=FWD
+                    'team': player['team']
                 }
             
             # Store gameweeks
@@ -124,6 +124,9 @@ class FPLDataCollector:
                 ))
             
             logger.info(f"Stored {len(teams)} teams")
+            
+            # Collect all squads for differential analysis
+            all_squads = {}
             
             # 3. Get detailed history for each team
             for team in teams:
@@ -196,23 +199,96 @@ class FPLDataCollector:
                             ','.join(data['out'])
                         ))
                     
-                    # Calculate player stats for this manager's current squad
+                    # NEW: Collect captain and position data for each completed gameweek
+                    for gw in history['current']:
+                        gameweek_num = gw['event']
+                        
+                        # Check if gameweek is finished
+                        is_finished = cursor.execute(
+                            'SELECT finished FROM gameweeks WHERE id = ?',
+                            [gameweek_num]
+                        ).fetchone()
+                        
+                        if is_finished and is_finished['finished']:
+                            try:
+                                picks_data = self.get_entry_picks(entry_id, gameweek_num)
+                                
+                                # Track captain and position points
+                                captain_id = None
+                                captain_name = None
+                                captain_points = 0
+                                position_points = {'GK': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
+                                position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
+                                
+                                for pick in picks_data['picks']:
+                                    player_id = pick['element']
+                                    multiplier = pick['multiplier']
+                                    
+                                    # Get player details
+                                    player_info = self.player_details.get(player_id, {})
+                                    position_type = player_info.get('position', 2)
+                                    position = position_map.get(position_type, 'DEF')
+                                    
+                                    # Points for this player (multiplier already applied in pick)
+                                    player_points = multiplier * pick.get('points', 0) if 'points' in pick else 0
+                                    
+                                    # Track captain
+                                    if pick['is_captain']:
+                                        captain_id = player_id
+                                        captain_name = player_info.get('name', 'Unknown')
+                                        captain_points = player_points
+                                    
+                                    # Add to position totals
+                                    position_points[position] += player_points
+                                
+                                # Store captain choice
+                                if captain_id:
+                                    cursor.execute('''
+                                        INSERT OR REPLACE INTO captain_choices
+                                        (entry_id, gameweek, player_id, player_name, captain_points)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    ''', (entry_id, gameweek_num, captain_id, captain_name, captain_points))
+                                
+                                # Store position breakdown
+                                cursor.execute('''
+                                    INSERT OR REPLACE INTO position_points
+                                    (entry_id, gameweek, gk_points, def_points, mid_points, fwd_points)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                ''', (
+                                    entry_id, gameweek_num,
+                                    position_points['GK'],
+                                    position_points['DEF'],
+                                    position_points['MID'],
+                                    position_points['FWD']
+                                ))
+                                
+                            except Exception as e:
+                                logger.warning(f"Could not fetch picks for GW{gameweek_num}: {e}")
+                    
+                    # Store current squad for differential analysis
+                    try:
+                        current_picks = self.get_entry_picks(entry_id, current_gw)
+                        all_squads[entry_id] = [pick['element'] for pick in current_picks['picks']]
+                    except Exception as e:
+                        logger.warning(f"Could not fetch current picks for differential: {e}")
+                    
+                    # Calculate cumulative player stats for this manager
                     total_goals = 0
                     total_assists = 0
                     total_clean_sheets = 0
                     
-                    # Get current gameweek picks to see what players they have
                     try:
                         picks = self.get_entry_picks(entry_id, current_gw)
                         for pick in picks['picks']:
                             player_id = pick['element']
-                            if player_id in player_stats_map:
-                                stats = player_stats_map[player_id]
-                                total_goals += stats['goals']
-                                total_assists += stats['assists']
-                                total_clean_sheets += stats['clean_sheets']
+                            # Get player from bootstrap data
+                            player = next((p for p in bootstrap['elements'] if p['id'] == player_id), None)
+                            if player:
+                                total_goals += player.get('goals_scored', 0)
+                                total_assists += player.get('assists', 0)
+                                total_clean_sheets += player.get('clean_sheets', 0)
                     except Exception as e:
-                        logger.warning(f"Could not fetch picks for current GW: {e}")
+                        logger.warning(f"Could not calculate player stats: {e}")
                     
                     cursor.execute('''
                         INSERT OR REPLACE INTO player_stats 
@@ -229,6 +305,38 @@ class FPLDataCollector:
                 except Exception as e:
                     logger.error(f"Error collecting data for team {entry_id}: {e}")
                     continue
+            
+            # 4. Calculate differentials (players owned by <50% of league)
+            if len(all_squads) > 0:
+                logger.info("Calculating differentials...")
+                
+                player_ownership = {}
+                for squad in all_squads.values():
+                    for player_id in squad:
+                        player_ownership[player_id] = player_ownership.get(player_id, 0) + 1
+                
+                total_teams = len(all_squads)
+                
+                for entry_id, squad in all_squads.items():
+                    differentials = []
+                    for player_id in squad:
+                        ownership_count = player_ownership.get(player_id, 0)
+                        ownership_pct = (ownership_count / total_teams) * 100
+                        
+                        if ownership_pct < 50:  # Differential = owned by less than 50%
+                            player_name = self.player_map.get(player_id, 'Unknown')
+                            differentials.append(f"{player_name} ({ownership_pct:.0f}%)")
+                    
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO differentials
+                        (entry_id, gameweek, differential_players, differential_count)
+                        VALUES (?, ?, ?, ?)
+                    ''', (
+                        entry_id,
+                        current_gw,
+                        ','.join(differentials) if differentials else '',
+                        len(differentials)
+                    ))
             
             conn.commit()
             logger.info("Data collection completed successfully!")
