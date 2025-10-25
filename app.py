@@ -636,8 +636,9 @@ def api_team_comparison():
 def api_biggest_movers():
     """API endpoint for biggest position changes in last 5 GWs"""
     try:
-        current_gw = get_current_gameweek()
-        past_gw = max(1, current_gw - 5)
+        # Use last completed gameweek instead of current
+        last_completed_gw = get_last_completed_gameweek()
+        past_gw = max(1, last_completed_gw - 5)
         
         selected_teams = request.args.getlist('teams')
         
@@ -647,26 +648,41 @@ def api_biggest_movers():
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
             query = f'''
-                WITH past_rankings AS (
+                WITH past_totals AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
-                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points,
-                        RANK() OVER (ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as rank
+                        SUM(gp.points) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
                     WHERE gp.gameweek <= ? AND t.entry_id IN ({placeholders})
+                    GROUP BY t.entry_id, t.team_name
                 ),
-                current_rankings AS (
+                past_rankings AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        total_points,
+                        RANK() OVER (ORDER BY total_points DESC) as rank
+                    FROM past_totals
+                ),
+                current_totals AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
-                        SUM(gp.points) as total_points,
-                        RANK() OVER (ORDER BY SUM(gp.points) DESC) as rank
+                        SUM(gp.points) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
-                    WHERE t.entry_id IN ({placeholders})
-                    GROUP BY t.entry_id
+                    WHERE gp.gameweek <= ? AND t.entry_id IN ({placeholders})
+                    GROUP BY t.entry_id, t.team_name
+                ),
+                current_rankings AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        total_points,
+                        RANK() OVER (ORDER BY total_points DESC) as rank
+                    FROM current_totals
                 )
                 SELECT 
                     c.team_name,
@@ -677,29 +693,45 @@ def api_biggest_movers():
                 LEFT JOIN past_rankings p ON c.entry_id = p.entry_id
                 ORDER BY change DESC
             '''
-            params = [past_gw] + selected_teams + selected_teams
+            params = [past_gw] + selected_teams + [last_completed_gw] + selected_teams
             rows = conn.execute(query, params).fetchall()
         else:
             rows = conn.execute('''
-                WITH past_rankings AS (
+                WITH past_totals AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
-                        SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points,
-                        RANK() OVER (ORDER BY SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) DESC) as rank
+                        SUM(gp.points) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
                     WHERE gp.gameweek <= ?
+                    GROUP BY t.entry_id, t.team_name
                 ),
-                current_rankings AS (
+                past_rankings AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        total_points,
+                        RANK() OVER (ORDER BY total_points DESC) as rank
+                    FROM past_totals
+                ),
+                current_totals AS (
                     SELECT 
                         t.entry_id,
                         t.team_name,
-                        SUM(gp.points) as total_points,
-                        RANK() OVER (ORDER BY SUM(gp.points) DESC) as rank
+                        SUM(gp.points) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
-                    GROUP BY t.entry_id
+                    WHERE gp.gameweek <= ?
+                    GROUP BY t.entry_id, t.team_name
+                ),
+                current_rankings AS (
+                    SELECT 
+                        entry_id,
+                        team_name,
+                        total_points,
+                        RANK() OVER (ORDER BY total_points DESC) as rank
+                    FROM current_totals
                 )
                 SELECT 
                     c.team_name,
@@ -709,7 +741,7 @@ def api_biggest_movers():
                 FROM current_rankings c
                 LEFT JOIN past_rankings p ON c.entry_id = p.entry_id
                 ORDER BY change DESC
-            ''', [past_gw]).fetchall()
+            ''', [past_gw, last_completed_gw]).fetchall()
         
         conn.close()
         
