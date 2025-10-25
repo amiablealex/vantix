@@ -319,9 +319,13 @@ class FPLDataCollector:
 
 
 if __name__ == '__main__':
-    # Test data collection
-    collector = FPLDataCollector(
-        team_id=config.FPL_TEAM_ID,
-        league_id=config.FPL_LEAGUE_ID
-    )
+    # Use first configured league for manual runs
+    if not config.LEAGUES:
+        print("No leagues configured in config.py")
+        sys.exit(1)
+    
+    league_code = config.LEAGUES[0]['code']
+    print(f"Collecting data for league {league_code}")
+    
+    collector = FPLDataCollector(team_id=None, league_id=league_code)
     collector.collect_all_data()
