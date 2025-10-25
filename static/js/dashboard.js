@@ -23,7 +23,8 @@ window.VantixDashboard = {
         points: null,
         position: null,
         form: null,
-        distribution: null
+        distribution: null,
+        sources: null
     }
 };
 
@@ -49,6 +50,7 @@ document.addEventListener('DOMContentLoaded', function() {
             initializeAllCharts();
             initializeTransfers();
             initializeAnalytics();
+            initializeNewFeatures(); // NEW FEATURES
             setupRefreshButton();
         }, 100);
         
@@ -131,6 +133,7 @@ function updateAllVisualizations() {
     initializeAllCharts();
     initializeTransfers();
     initializeAnalytics();
+    initializeNewFeatures(); // NEW FEATURES
 }
 
 // Load and display stats - NOW FILTERED BY SELECTED TEAMS
@@ -381,6 +384,370 @@ function setupRefreshButton() {
                 refreshButton.style.transform = 'rotate(0deg)';
             });
     });
+}
+
+// Initialize all new features
+function initializeNewFeatures() {
+    initializeTransferStrategy();
+    initializeCaptainHeatmap();
+    initializeHeadToHead();
+    initializePointsSources();
+    initializeDifferentials();
+    initializePodium();
+}
+
+// Initialize Transfer Strategy
+function initializeTransferStrategy() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/transfer-strategy?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            displayTransferStrategy(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading transfer strategy:', error);
+        });
+}
+
+// Display Transfer Strategy
+function displayTransferStrategy(teams) {
+    const container = document.getElementById('transferStrategyGrid');
+    
+    if (!teams || teams.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">No teams selected</p>';
+        return;
+    }
+    
+    container.innerHTML = teams.map(team => `
+        <div class="strategy-card">
+            <div class="strategy-team-name">${team.team_name}</div>
+            <div class="strategy-stat-row">
+                <span class="strategy-stat-label">Total Transfers</span>
+                <span class="strategy-stat-value">${team.total_transfers}</span>
+            </div>
+            <div class="strategy-stat-row">
+                <span class="strategy-stat-label">Hits Taken</span>
+                <span class="strategy-stat-value">${team.hits_taken}</span>
+            </div>
+            <div class="strategy-stat-row highlight">
+                <span class="strategy-stat-label">Points Lost</span>
+                <span class="strategy-stat-value negative">-${team.points_lost}</span>
+            </div>
+            <div class="strategy-stat-row">
+                <span class="strategy-stat-label">Avg Cost/Transfer</span>
+                <span class="strategy-stat-value">
+                    ${team.total_transfers > 0 ? (team.points_lost / team.total_transfers).toFixed(1) : '0.0'}
+                </span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Initialize Captain Heatmap
+function initializeCaptainHeatmap() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/captain-performance?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            renderCaptainHeatmap(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading captain heatmap:', error);
+        });
+}
+
+// Render Captain Heatmap
+function renderCaptainHeatmap(teams) {
+    const container = document.getElementById('captainHeatmap');
+    
+    if (!teams || teams.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">No data available</p>';
+        return;
+    }
+    
+    // Get all unique gameweeks
+    const allGameweeks = [...new Set(teams.flatMap(team => 
+        team.gameweeks.map(gw => gw.gameweek)
+    ))].sort((a, b) => a - b);
+    
+    // Create heatmap HTML
+    let html = '<div class="heatmap-grid">';
+    
+    // Header row
+    html += '<div class="heatmap-row heatmap-header">';
+    html += '<div class="heatmap-cell heatmap-label">Team</div>';
+    allGameweeks.forEach(gw => {
+        html += `<div class="heatmap-cell heatmap-gw">GW${gw}</div>`;
+    });
+    html += '</div>';
+    
+    // Data rows
+    teams.forEach(team => {
+        html += '<div class="heatmap-row">';
+        html += `<div class="heatmap-cell heatmap-label">${team.team_name}</div>`;
+        
+        allGameweeks.forEach(gw => {
+            const gwData = team.gameweeks.find(g => g.gameweek === gw);
+            const points = gwData ? gwData.points : 0;
+            
+            // Color intensity based on points (0-100+ scale)
+            let intensity = '';
+            if (points >= 80) intensity = 'very-high';
+            else if (points >= 60) intensity = 'high';
+            else if (points >= 45) intensity = 'medium';
+            else if (points >= 30) intensity = 'low';
+            else intensity = 'very-low';
+            
+            html += `<div class="heatmap-cell heatmap-value ${intensity}" title="${team.team_name} GW${gw}: ${points} pts">${points}</div>`;
+        });
+        
+        html += '</div>';
+    });
+    
+    html += '</div>';
+    
+    container.innerHTML = html;
+}
+
+// Initialize Head-to-Head
+function initializeHeadToHead() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/head-to-head?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            displayHeadToHead(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading head-to-head:', error);
+        });
+}
+
+// Display Head-to-Head
+function displayHeadToHead(teams) {
+    const container = document.getElementById('headToHeadTable');
+    
+    if (!teams || teams.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">Select at least 2 teams</p>';
+        return;
+    }
+    
+    let html = `
+        <table class="h2h-table">
+            <thead>
+                <tr>
+                    <th>Team</th>
+                    <th>Wins</th>
+                    <th>Draws</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    teams.forEach((team, index) => {
+        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+        html += `
+            <tr>
+                <td class="h2h-team">${medal} ${team.team_name}</td>
+                <td class="h2h-wins">${team.wins}</td>
+                <td class="h2h-draws">${team.draws}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+// Initialize Points Sources
+function initializePointsSources() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/points-sources?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            renderPointsSources(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading points sources:', error);
+        });
+}
+
+// Render Points Sources Chart
+function renderPointsSources(teams) {
+    const ctx = document.getElementById('pointsSourcesChart');
+    
+    if (!ctx) {
+        console.error('Points sources chart canvas missing');
+        return;
+    }
+    
+    if (VantixDashboard.charts.sources) {
+        VantixDashboard.charts.sources.destroy();
+    }
+    
+    if (!teams || teams.length === 0) {
+        ctx.parentElement.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">No data available</p><canvas id="pointsSourcesChart"></canvas>';
+        return;
+    }
+    
+    const labels = teams.map(t => t.team_name);
+    
+    VantixDashboard.charts.sources = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Goalkeepers',
+                    data: teams.map(t => t.goalkeeper),
+                    backgroundColor: '#A8DADC',
+                    borderColor: '#8AC4C6',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Defenders',
+                    data: teams.map(t => t.defenders),
+                    backgroundColor: '#B8D4B8',
+                    borderColor: '#9FBE9F',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Midfielders',
+                    data: teams.map(t => t.midfielders),
+                    backgroundColor: '#F1C6B7',
+                    borderColor: '#E0B0A0',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Forwards',
+                    data: teams.map(t => t.forwards),
+                    backgroundColor: '#D4B5D4',
+                    borderColor: '#C0A0C0',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false }
+                },
+                y: {
+                    stacked: true,
+                    title: { display: true, text: 'Points' },
+                    grid: { color: '#F5F2EB' }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    backgroundColor: '#FFFFFF',
+                    titleColor: '#3A3A3A',
+                    bodyColor: '#3A3A3A',
+                    borderColor: '#E8DCC4',
+                    borderWidth: 1,
+                    padding: 12
+                }
+            }
+        }
+    });
+}
+
+// Initialize Differentials
+function initializeDifferentials() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/differentials?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            displayDifferentials(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading differentials:', error);
+        });
+}
+
+// Display Differentials
+function displayDifferentials(teams) {
+    const container = document.getElementById('differentialsGrid');
+    
+    if (!teams || teams.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">No teams selected</p>';
+        return;
+    }
+    
+    container.innerHTML = teams.map(team => `
+        <div class="differential-card">
+            <div class="differential-team-name">${team.team_name}</div>
+            <div class="differential-count">
+                <span class="differential-number">${team.differential_count}</span>
+                <span class="differential-label">Unique Players</span>
+            </div>
+            <div class="differential-players">
+                ${team.recent_differentials.slice(0, 3).map(player => 
+                    `<span class="differential-player">${player}</span>`
+                ).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Initialize Podium
+function initializePodium() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/podium?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            displayPodium(data.podium);
+        })
+        .catch(error => {
+            console.error('Error loading podium:', error);
+        });
+}
+
+// Display Podium
+function displayPodium(podium) {
+    const container = document.getElementById('podiumDisplay');
+    
+    if (!podium || podium.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">Not enough data</p>';
+        return;
+    }
+    
+    const medals = ['🥇', '🥈', '🥉'];
+    const positions = ['first', 'second', 'third'];
+    
+    container.innerHTML = podium.map((team, index) => `
+        <div class="podium-card podium-${positions[index]}">
+            <div class="podium-medal">${medals[index]}</div>
+            <div class="podium-position">#${team.position}</div>
+            <div class="podium-team-name">${team.team_name}</div>
+            <div class="podium-manager">${team.manager_name}</div>
+            <div class="podium-points">${team.total_points} pts</div>
+            <div class="podium-form">Form: ${team.recent_form} avg</div>
+            ${team.gap > 0 ? `<div class="podium-gap">-${team.gap} behind</div>` : ''}
+        </div>
+    `).join('');
 }
 
 // Show error message

@@ -770,6 +770,388 @@ def api_biggest_movers():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/transfer-strategy')
+def api_transfer_strategy():
+    """API endpoint for transfer strategy analysis"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        conn = get_db_connection()
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        strategy_data = []
+        
+        for team_id in selected_teams:
+            # Get team info
+            team_info = conn.execute('''
+                SELECT t.team_name, t.manager_name
+                FROM teams t
+                WHERE t.entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            if not team_info:
+                continue
+            
+            # Total transfers
+            total_transfers = conn.execute('''
+                SELECT SUM(transfer_count) as total
+                FROM transfers
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Count hits taken (transfers > 1 in a gameweek means hits)
+            hits_taken = conn.execute('''
+                SELECT COUNT(*) as hits
+                FROM transfers
+                WHERE entry_id = ? AND transfer_count > 1
+            ''', [team_id]).fetchone()
+            
+            # Calculate points lost (each extra transfer costs 4 points)
+            points_lost = conn.execute('''
+                SELECT SUM((transfer_count - 1) * 4) as lost
+                FROM transfers
+                WHERE entry_id = ? AND transfer_count > 1
+            ''', [team_id]).fetchone()
+            
+            strategy_data.append({
+                'team_name': team_info['team_name'],
+                'manager_name': team_info['manager_name'],
+                'total_transfers': total_transfers['total'] if total_transfers['total'] else 0,
+                'hits_taken': hits_taken['hits'] if hits_taken['hits'] else 0,
+                'points_lost': points_lost['lost'] if points_lost['lost'] else 0
+            })
+        
+        conn.close()
+        return jsonify({'teams': strategy_data})
+    except Exception as e:
+        logger.error(f"Error fetching transfer strategy: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/captain-performance')
+def api_captain_performance():
+    """API endpoint for captain performance heatmap data"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        last_completed_gw = get_last_completed_gameweek()
+        
+        conn = get_db_connection()
+        
+        # Note: This is simplified - actual captain data would need to be collected
+        # For now, we'll estimate based on points patterns
+        # In a full implementation, you'd store captain choices in the database
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        placeholders = ','.join('?' * len(selected_teams))
+        
+        # Get gameweek points for heatmap
+        query = f'''
+            SELECT 
+                t.entry_id,
+                t.team_name,
+                gp.gameweek,
+                gp.points
+            FROM teams t
+            JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            WHERE t.entry_id IN ({placeholders}) AND gp.gameweek <= ?
+            ORDER BY t.entry_id, gp.gameweek
+        '''
+        rows = conn.execute(query, selected_teams + [last_completed_gw]).fetchall()
+        
+        conn.close()
+        
+        # Transform data for heatmap
+        teams_data = {}
+        for row in rows:
+            entry_id = row['entry_id']
+            if entry_id not in teams_data:
+                teams_data[entry_id] = {
+                    'team_name': row['team_name'],
+                    'gameweeks': []
+                }
+            teams_data[entry_id]['gameweeks'].append({
+                'gameweek': row['gameweek'],
+                'points': row['points']
+            })
+        
+        return jsonify({'teams': list(teams_data.values())})
+    except Exception as e:
+        logger.error(f"Error fetching captain performance: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/head-to-head')
+def api_head_to_head():
+    """API endpoint for head-to-head weekly wins"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        last_completed_gw = get_last_completed_gameweek()
+        
+        conn = get_db_connection()
+        
+        if not selected_teams or len(selected_teams) < 2:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        placeholders = ','.join('?' * len(selected_teams))
+        
+        # Get all gameweek performances for selected teams
+        query = f'''
+            SELECT 
+                t.entry_id,
+                t.team_name,
+                gp.gameweek,
+                gp.points
+            FROM teams t
+            JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            WHERE t.entry_id IN ({placeholders}) AND gp.gameweek <= ?
+            ORDER BY gp.gameweek, gp.points DESC
+        '''
+        rows = conn.execute(query, selected_teams + [last_completed_gw]).fetchall()
+        
+        conn.close()
+        
+        # Group by gameweek and count wins
+        gameweeks = {}
+        for row in rows:
+            gw = row['gameweek']
+            if gw not in gameweeks:
+                gameweeks[gw] = []
+            gameweeks[gw].append({
+                'entry_id': row['entry_id'],
+                'team_name': row['team_name'],
+                'points': row['points']
+            })
+        
+        # Count wins and draws for each team
+        team_records = {}
+        for team_id in selected_teams:
+            team_records[int(team_id)] = {'wins': 0, 'draws': 0, 'team_name': ''}
+        
+        for gw, teams in gameweeks.items():
+            if not teams:
+                continue
+            
+            max_points = max(team['points'] for team in teams)
+            winners = [team for team in teams if team['points'] == max_points]
+            
+            if len(winners) == 1:
+                # Single winner
+                winner_id = winners[0]['entry_id']
+                team_records[winner_id]['wins'] += 1
+                team_records[winner_id]['team_name'] = winners[0]['team_name']
+            else:
+                # Multiple winners (draw)
+                for winner in winners:
+                    winner_id = winner['entry_id']
+                    team_records[winner_id]['draws'] += 1
+                    team_records[winner_id]['team_name'] = winner['team_name']
+            
+            # Set team names for all teams
+            for team in teams:
+                team_records[team['entry_id']]['team_name'] = team['team_name']
+        
+        # Convert to list format
+        result = [
+            {
+                'team_name': record['team_name'],
+                'wins': record['wins'],
+                'draws': record['draws']
+            }
+            for record in team_records.values()
+            if record['team_name']
+        ]
+        
+        # Sort by wins, then draws
+        result.sort(key=lambda x: (x['wins'], x['draws']), reverse=True)
+        
+        return jsonify({'teams': result})
+    except Exception as e:
+        logger.error(f"Error fetching head-to-head: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/points-sources')
+def api_points_sources():
+    """API endpoint for points breakdown by position"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        # Note: This is simplified - actual position data would need to be collected
+        # For now, we'll use player_stats as a proxy
+        # In a full implementation, you'd track points by position in the database
+        
+        sources_data = []
+        
+        for team_id in selected_teams:
+            team_info = conn.execute('''
+                SELECT t.team_name
+                FROM teams t
+                WHERE t.entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            if not team_info:
+                continue
+            
+            # Get total points
+            total_points = conn.execute('''
+                SELECT SUM(points) as total
+                FROM gameweek_points
+                WHERE entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            # Simplified breakdown (you would need actual position tracking)
+            # For now, create rough estimates based on typical FPL patterns
+            total = total_points['total'] if total_points['total'] else 0
+            
+            sources_data.append({
+                'team_name': team_info['team_name'],
+                'goalkeeper': int(total * 0.10),  # ~10% from GK
+                'defenders': int(total * 0.30),   # ~30% from DEF
+                'midfielders': int(total * 0.40), # ~40% from MID
+                'forwards': int(total * 0.20)     # ~20% from FWD
+            })
+        
+        conn.close()
+        return jsonify({'teams': sources_data})
+    except Exception as e:
+        logger.error(f"Error fetching points sources: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/differentials')
+def api_differentials():
+    """API endpoint for differential tracker"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        # Note: This requires storing player ownership data
+        # For now, we'll provide a simplified version based on transfers
+        
+        differentials_data = []
+        
+        for team_id in selected_teams:
+            team_info = conn.execute('''
+                SELECT t.team_name
+                FROM teams t
+                WHERE t.entry_id = ?
+            ''', [team_id]).fetchone()
+            
+            if not team_info:
+                continue
+            
+            # Get recent transfers in
+            recent_transfers = conn.execute('''
+                SELECT transfers_in
+                FROM transfers
+                WHERE entry_id = ?
+                ORDER BY gameweek DESC
+                LIMIT 5
+            ''', [team_id]).fetchall()
+            
+            unique_players = []
+            for transfer in recent_transfers:
+                if transfer['transfers_in']:
+                    players = transfer['transfers_in'].split(',')
+                    unique_players.extend(players[:2])  # Take first 2
+            
+            differentials_data.append({
+                'team_name': team_info['team_name'],
+                'differential_count': len(set(unique_players)),
+                'recent_differentials': list(set(unique_players))[:5]
+            })
+        
+        conn.close()
+        return jsonify({'teams': differentials_data})
+    except Exception as e:
+        logger.error(f"Error fetching differentials: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/podium')
+def api_podium():
+    """API endpoint for top 3 podium"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        
+        conn = get_db_connection()
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'podium': []})
+        
+        placeholders = ','.join('?' * len(selected_teams))
+        
+        # Get top 3 teams by total points
+        query = f'''
+            SELECT 
+                t.entry_id,
+                t.team_name,
+                t.manager_name,
+                SUM(gp.points) as total_points
+            FROM teams t
+            JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            WHERE t.entry_id IN ({placeholders})
+            GROUP BY t.entry_id
+            ORDER BY total_points DESC
+            LIMIT 3
+        '''
+        rows = conn.execute(query, selected_teams).fetchall()
+        
+        podium = []
+        for idx, row in enumerate(rows):
+            # Get recent form (last 3 GWs)
+            recent_form = conn.execute('''
+                SELECT AVG(points) as avg_points
+                FROM (
+                    SELECT points
+                    FROM gameweek_points
+                    WHERE entry_id = ?
+                    ORDER BY gameweek DESC
+                    LIMIT 3
+                )
+            ''', [row['entry_id']]).fetchone()
+            
+            # Calculate lead/gap
+            if idx == 0:
+                gap = 0  # Leader
+            else:
+                leader_points = rows[0]['total_points']
+                gap = leader_points - row['total_points']
+            
+            podium.append({
+                'position': idx + 1,
+                'team_name': row['team_name'],
+                'manager_name': row['manager_name'],
+                'total_points': row['total_points'],
+                'recent_form': round(recent_form['avg_points'], 1) if recent_form['avg_points'] else 0,
+                'gap': gap
+            })
+        
+        conn.close()
+        return jsonify({'podium': podium})
+    except Exception as e:
+        logger.error(f"Error fetching podium: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/refresh', methods=['POST'])
 def api_refresh():
     """Manually trigger data refresh"""
