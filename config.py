@@ -16,6 +16,11 @@ LEAGUES = [
         'name': 'The Dandy Lions',
         'description': 'My secondary FPL league'
     },
+    {
+        'code': 1049424,  # Replace with your first league code
+        'name': 'Cals Pals',
+        'description': 'My tertiary FPL league'
+    },
     # Add more leagues as needed:
     # {
     #     'code': 456789,
