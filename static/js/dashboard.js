@@ -1,15 +1,19 @@
-// Extract league code from URL for API calls
-const leagueCode = window.location.pathname.split('/')[1] || '';
-
 /**
  * Vantix Dashboard - Main JavaScript
  * Master filter coordination and data loading - NOW FILTERS STATS TOO
  */
 
+// Extract league code from URL for API calls
+const pathParts = window.location.pathname.split('/').filter(p => p);
+const leagueCode = pathParts.length > 0 ? pathParts[0] : '';
+
+console.log('League code extracted:', leagueCode);
+
 // Global state
 window.VantixDashboard = {
     teams: [],
     selectedTeams: new Set(), // Single master selection
+    leagueCode: leagueCode,
     colors: [
         '#A8DADC', // Powder blue
         '#F1C6B7', // Dusty pink

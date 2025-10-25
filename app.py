@@ -89,7 +89,6 @@ def format_time_ago(timestamp_str):
         return "Unknown"
 
 
-
 @app.route('/')
 def league_list():
     """Landing page with all configured leagues"""
@@ -144,15 +143,30 @@ def dashboard_league(league_code):
         return render_template('error.html', 
             error=f'No data for league {league_code}. Run collect_all_leagues.py first.'), 404
 
+    # CRITICAL FIX: Fetch teams data
     conn = get_league_connection(league_code)
     teams = conn.execute('SELECT * FROM teams ORDER BY team_name').fetchall()
     teams = [dict(team) for team in teams]  # Convert to list of dicts
+    
+    # Get current gameweek
+    current_gw = get_current_gameweek(league_code)
+    
+    # Get last update time
+    last_update_row = conn.execute(
+        'SELECT MAX(created_at) as last_update FROM gameweek_points'
+    ).fetchone()
+    last_update = format_time_ago(last_update_row['last_update']) if last_update_row and last_update_row['last_update'] else None
+    
     conn.close()
     
     return render_template('dashboard.html', 
         league_code=league_code,
         league_name=league_config['name'],
-        teams=teams)
+        teams=teams,
+        current_gameweek=current_gw,
+        season=get_season_string(),
+        last_update=last_update
+    )
 
 
 @app.route('/api/<int:league_code>/cumulative-points')
@@ -472,7 +486,6 @@ def api_stats(league_code):
 def api_form_chart(league_code):
     """API endpoint for recent form (last 5 gameweeks)"""
     try:
-        # Get the last completed gameweek
         conn = get_league_connection(league_code)
         last_completed = conn.execute('''
             SELECT MAX(id) as max_gw
@@ -485,7 +498,7 @@ def api_form_chart(league_code):
             return jsonify({'teams': []})
         
         end_gw = last_completed['max_gw']
-        start_gw = max(1, end_gw - 4)  # Last 5 completed gameweeks
+        start_gw = max(1, end_gw - 4)
         
         selected_teams = request.args.getlist('teams')
         
@@ -519,7 +532,6 @@ def api_form_chart(league_code):
         
         conn.close()
         
-        # Transform data
         teams_data = {}
         for row in rows:
             entry_id = row['entry_id']
@@ -567,13 +579,11 @@ def api_points_distribution(league_code):
         
         conn.close()
         
-        # Create histogram bins
         points_list = [row['points'] for row in rows]
         
         if not points_list:
             return jsonify({'bins': [], 'counts': []})
         
-        # Create bins (0-20, 20-40, 40-60, 60-80, 80-100, 100+)
         bins = [0, 20, 40, 60, 80, 100, 150]
         counts = [0] * (len(bins) - 1)
         
@@ -599,7 +609,7 @@ def api_points_distribution(league_code):
 
 @app.route('/api/<int:league_code>/team-comparison')
 def api_team_comparison(league_code):
-    """API endpoint for detailed team comparison stats - NOW WITH HITS, COMPLETED GWs ONLY"""
+    """API endpoint for detailed team comparison stats"""
     try:
         selected_teams = request.args.getlist('teams')
         
@@ -607,14 +617,11 @@ def api_team_comparison(league_code):
             return jsonify({'teams': []})
         
         conn = get_league_connection(league_code)
-        
-        # Get last completed gameweek
         last_completed_gw = get_last_completed_gameweek(league_code)
         
         comparison_data = []
         
         for team_id in selected_teams:
-            # Get basic stats
             team_info = conn.execute('''
                 SELECT t.team_name, t.manager_name
                 FROM teams t
@@ -624,49 +631,42 @@ def api_team_comparison(league_code):
             if not team_info:
                 continue
             
-            # Total points (completed GWs only)
             total_points = conn.execute('''
                 SELECT SUM(points) as total
                 FROM gameweek_points
                 WHERE entry_id = ? AND gameweek <= ?
             ''', [team_id, last_completed_gw]).fetchone()
             
-            # Average points per GW (completed GWs only)
             avg_points = conn.execute('''
                 SELECT AVG(points) as avg
                 FROM gameweek_points
                 WHERE entry_id = ? AND gameweek <= ?
             ''', [team_id, last_completed_gw]).fetchone()
             
-            # Highest GW score (completed GWs only)
             highest_gw = conn.execute('''
                 SELECT MAX(points) as highest
                 FROM gameweek_points
                 WHERE entry_id = ? AND gameweek <= ?
             ''', [team_id, last_completed_gw]).fetchone()
             
-            # Lowest GW score (completed GWs only)
             lowest_gw = conn.execute('''
                 SELECT MIN(points) as lowest
                 FROM gameweek_points
                 WHERE entry_id = ? AND gameweek <= ?
             ''', [team_id, last_completed_gw]).fetchone()
             
-            # Total transfers
             total_transfers = conn.execute('''
                 SELECT SUM(transfer_count) as total
                 FROM transfers
                 WHERE entry_id = ?
             ''', [team_id]).fetchone()
             
-            # Hits taken (gameweeks with >1 transfer)
             hits_taken = conn.execute('''
                 SELECT COUNT(*) as hits
                 FROM transfers
                 WHERE entry_id = ? AND transfer_count > 1
             ''', [team_id]).fetchone()
             
-            # Chips used
             chips_used = conn.execute('''
                 SELECT COUNT(*) as count
                 FROM chip_usage
@@ -697,7 +697,6 @@ def api_team_comparison(league_code):
 def api_biggest_movers(league_code):
     """API endpoint for biggest position changes in last 5 GWs"""
     try:
-        # Use last completed gameweek instead of current
         last_completed_gw = get_last_completed_gameweek(league_code)
         past_gw = max(1, last_completed_gw - 5)
         
@@ -705,7 +704,6 @@ def api_biggest_movers(league_code):
         
         conn = get_league_connection(league_code)
         
-        # Get rankings for past_gw and current_gw
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
             query = f'''
@@ -823,8 +821,8 @@ def api_biggest_movers(league_code):
                 fallers.append(mover)
         
         return jsonify({
-            'climbers': climbers[:5],  # Top 5 climbers
-            'fallers': fallers[:5]  # Top 5 fallers
+            'climbers': climbers[:5],
+            'fallers': fallers[:5]
         })
     except Exception as e:
         logger.error(f"Error fetching biggest movers: {e}")
@@ -833,7 +831,7 @@ def api_biggest_movers(league_code):
 
 @app.route('/api/<int:league_code>/weekly-performance')
 def api_weekly_performance(league_code):
-    """API endpoint for weekly performance heatmap - uses total GW points"""
+    """API endpoint for weekly performance heatmap"""
     try:
         selected_teams = request.args.getlist('teams')
         last_completed_gw = get_last_completed_gameweek(league_code)
@@ -846,7 +844,6 @@ def api_weekly_performance(league_code):
         
         placeholders = ','.join('?' * len(selected_teams))
         
-        # Get total gameweek points
         query = f'''
             SELECT 
                 t.entry_id,
@@ -862,7 +859,6 @@ def api_weekly_performance(league_code):
         
         conn.close()
         
-        # Transform data for heatmap
         teams_data = {}
         for row in rows:
             entry_id = row['entry_id']
@@ -897,7 +893,6 @@ def api_head_to_head(league_code):
         
         placeholders = ','.join('?' * len(selected_teams))
         
-        # Get all gameweek performances for selected teams
         query = f'''
             SELECT 
                 t.entry_id,
@@ -913,7 +908,6 @@ def api_head_to_head(league_code):
         
         conn.close()
         
-        # Group by gameweek and count wins
         gameweeks = {}
         for row in rows:
             gw = row['gameweek']
@@ -925,7 +919,6 @@ def api_head_to_head(league_code):
                 'points': row['points']
             })
         
-        # Count wins and draws for each team
         team_records = {}
         for team_id in selected_teams:
             team_records[int(team_id)] = {'wins': 0, 'draws': 0, 'team_name': ''}
@@ -938,22 +931,18 @@ def api_head_to_head(league_code):
             winners = [team for team in teams if team['points'] == max_points]
             
             if len(winners) == 1:
-                # Single winner
                 winner_id = winners[0]['entry_id']
                 team_records[winner_id]['wins'] += 1
                 team_records[winner_id]['team_name'] = winners[0]['team_name']
             else:
-                # Multiple winners (draw)
                 for winner in winners:
                     winner_id = winner['entry_id']
                     team_records[winner_id]['draws'] += 1
                     team_records[winner_id]['team_name'] = winner['team_name']
             
-            # Set team names for all teams
             for team in teams:
                 team_records[team['entry_id']]['team_name'] = team['team_name']
         
-        # Convert to list format
         result = [
             {
                 'team_name': record['team_name'],
@@ -964,7 +953,6 @@ def api_head_to_head(league_code):
             if record['team_name']
         ]
         
-        # Sort by wins, then draws
         result.sort(key=lambda x: (x['wins'], x['draws']), reverse=True)
         
         return jsonify({'teams': result})
@@ -975,7 +963,7 @@ def api_head_to_head(league_code):
 
 @app.route('/api/<int:league_code>/differentials')
 def api_differentials(league_code):
-    """API endpoint for differential tracker - FILTER AWARE, calculates on-the-fly"""
+    """API endpoint for differential tracker"""
     try:
         selected_teams = request.args.getlist('teams')
         
@@ -985,12 +973,10 @@ def api_differentials(league_code):
             conn.close()
             return jsonify({'teams': []})
         
-        # Get current gameweek
         current_gw = get_current_gameweek(league_code)
         
         placeholders = ','.join('?' * len(selected_teams))
         
-        # Fetch current squads for selected teams
         squad_rows = conn.execute(f'''
             SELECT cs.entry_id, cs.player_ids, t.team_name
             FROM current_squads cs
@@ -1003,7 +989,6 @@ def api_differentials(league_code):
             conn.close()
             return jsonify({'teams': []})
         
-        # Build squads dictionary
         squads = {}
         team_names = {}
         for row in squad_rows:
@@ -1014,16 +999,13 @@ def api_differentials(league_code):
             else:
                 squads[entry_id] = set()
         
-        # Calculate player ownership among SELECTED teams only
         player_ownership = {}
         for squad in squads.values():
             for player_id in squad:
                 player_ownership[player_id] = player_ownership.get(player_id, 0) + 1
         
-        # Get all unique player IDs
         all_player_ids = set(player_ownership.keys())
         
-        # Fetch player names
         player_names_map = {}
         if all_player_ids:
             placeholders_players = ','.join('?' * len(all_player_ids))
@@ -1038,7 +1020,6 @@ def api_differentials(league_code):
         
         conn.close()
         
-        # Find differentials (owned by only 1 team in selection)
         differentials_data = []
         
         for entry_id, squad in squads.items():
@@ -1046,14 +1027,13 @@ def api_differentials(league_code):
             
             for player_id in squad:
                 if player_ownership.get(player_id, 0) == 1:
-                    # This player is unique to this team (among selected teams)
                     player_name = player_names_map.get(player_id, f'Player {player_id}')
                     true_differentials.append(player_name)
             
             differentials_data.append({
                 'team_name': team_names[entry_id],
                 'differential_count': len(true_differentials),
-                'recent_differentials': true_differentials  # All unique players
+                'recent_differentials': true_differentials
             })
         
         return jsonify({'teams': differentials_data})
@@ -1077,7 +1057,6 @@ def api_podium(league_code):
         
         placeholders = ','.join('?' * len(selected_teams))
         
-        # Get top 3 teams by total points
         query = f'''
             SELECT 
                 t.entry_id,
@@ -1095,7 +1074,6 @@ def api_podium(league_code):
         
         podium = []
         for idx, row in enumerate(rows):
-            # Get recent form (last 3 GWs)
             recent_form = conn.execute('''
                 SELECT AVG(points) as avg_points
                 FROM (
@@ -1107,9 +1085,8 @@ def api_podium(league_code):
                 )
             ''', [row['entry_id']]).fetchone()
             
-            # Calculate lead/gap
             if idx == 0:
-                gap = 0  # Leader
+                gap = 0
             else:
                 leader_points = rows[0]['total_points']
                 gap = leader_points - row['total_points']
@@ -1128,9 +1105,6 @@ def api_podium(league_code):
     except Exception as e:
         logger.error(f"Error fetching podium: {e}")
         return jsonify({'error': str(e)}), 500
-
-
-
 
 
 @app.route('/api/<int:league_code>/refresh', methods=['POST'])
@@ -1165,6 +1139,7 @@ def api_refresh_all():
     except Exception as e:
         logger.error(f"Error refreshing all leagues: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.errorhandler(404)
 def not_found(e):

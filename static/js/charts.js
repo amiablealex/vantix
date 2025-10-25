@@ -27,10 +27,11 @@ function renderChipLegend() {
 function initializeCumulativePointsChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    const leagueCode = VantixDashboard.leagueCode;
     
     console.log('Loading cumulative points for teams:', selectedTeams);
     
-    fetch(`/api/cumulative-points?${queryString}`)
+    fetch(`/api/${leagueCode}/cumulative-points?${queryString}`)
         .then(response => response.json())
         .then(data => {
             renderCumulativePointsChart(data.teams);
@@ -116,10 +117,11 @@ function renderCumulativePointsChart(teamsData) {
 function initializeLeaguePositionChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    const leagueCode = VantixDashboard.leagueCode;
     
     console.log('Loading league positions for teams:', selectedTeams);
     
-    fetch(`/api/league-positions?${queryString}`)
+    fetch(`/api/${leagueCode}/league-positions?${queryString}`)
         .then(response => response.json())
         .then(data => {
             renderLeaguePositionChart(data.teams);
@@ -271,10 +273,11 @@ function renderLeaguePositionChart(teamsData) {
 function initializeFormChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    const leagueCode = VantixDashboard.leagueCode;
     
     console.log('Loading form chart for teams:', selectedTeams);
     
-    fetch(`/api/form-chart?${queryString}`)
+    fetch(`/api/${leagueCode}/form-chart?${queryString}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -382,10 +385,11 @@ function renderFormChart(teamsData) {
 function initializeDistributionChart() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    const leagueCode = VantixDashboard.leagueCode;
     
     console.log('Loading distribution for teams:', selectedTeams);
     
-    fetch(`/api/points-distribution?${queryString}`)
+    fetch(`/api/${leagueCode}/points-distribution?${queryString}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
