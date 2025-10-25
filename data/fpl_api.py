@@ -103,6 +103,17 @@ class FPLDataCollector:
                     'position': player['element_type'],  # 1=GK, 2=DEF, 3=MID, 4=FWD
                     'team': player['team']
                 }
+                
+                # Store in database for quick lookup
+                cursor.execute('''
+                    INSERT OR REPLACE INTO players (player_id, web_name, full_name, updated_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (
+                    player['id'],
+                    player['web_name'],
+                    player['first_name'] + ' ' + player['second_name'],
+                    datetime.now()
+                ))
             
             # Store gameweeks
             for event in bootstrap['events']:
@@ -238,7 +249,21 @@ class FPLDataCollector:
                     # Store current squad for differential analysis
                     try:
                         current_picks = self.get_entry_picks(entry_id, current_gw)
-                        all_squads[entry_id] = [pick['element'] for pick in current_picks['picks']]
+                        squad_player_ids = [pick['element'] for pick in current_picks['picks']]
+                        all_squads[entry_id] = squad_player_ids
+                        
+                        # Store squad in database for filter-aware differentials
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO current_squads
+                            (entry_id, gameweek, player_ids, updated_at)
+                            VALUES (?, ?, ?, ?)
+                        ''', (
+                            entry_id,
+                            current_gw,
+                            ','.join(map(str, squad_player_ids)),
+                            datetime.now()
+                        ))
+                        
                     except Exception as e:
                         logger.warning(f"Could not fetch current picks for differential: {e}")
                     

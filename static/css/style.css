@@ -674,6 +674,7 @@ p {
     display: flex;
     align-items: center;
     gap: var(--spacing-md);
+    flex-wrap: wrap;
 }
 
 .podium-team-name {
@@ -681,32 +682,36 @@ p {
     font-size: 1rem;
     font-weight: 700;
     color: var(--color-text);
-    min-width: 150px;
+    min-width: 120px;
+    flex-shrink: 0;
 }
 
 .podium-stats {
     display: flex;
-    gap: var(--spacing-md);
+    gap: var(--spacing-sm);
     font-size: 0.875rem;
+    flex-wrap: wrap;
 }
 
 .podium-stat {
     display: flex;
     flex-direction: column;
     align-items: center;
+    min-width: 50px;
 }
 
 .podium-stat-value {
     font-weight: 700;
-    font-size: 1.125rem;
+    font-size: 1rem;
     color: var(--color-text);
 }
 
 .podium-stat-label {
-    font-size: 0.75rem;
+    font-size: 0.625rem;
     color: var(--color-text-light);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
 }
 
 @keyframes slideIn {
@@ -783,6 +788,90 @@ p {
 
 .strategy-stat-value.negative {
     color: #C33;
+}
+
+/* Weekly Performance Heatmap */
+.heatmap-section {
+    background: var(--bg-card);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.heatmap-container {
+    overflow-x: auto;
+}
+
+.heatmap-grid {
+    display: table;
+    width: 100%;
+    min-width: 600px;
+}
+
+.heatmap-row {
+    display: table-row;
+}
+
+.heatmap-cell {
+    display: table-cell;
+    padding: 8px;
+    text-align: center;
+    border: 1px solid var(--bg-secondary);
+    font-size: 0.875rem;
+}
+
+.heatmap-header {
+    font-weight: 600;
+    background: var(--bg-secondary);
+}
+
+.heatmap-label {
+    text-align: left;
+    font-weight: 500;
+    min-width: 120px;
+    background: var(--bg-secondary);
+}
+
+.heatmap-gw {
+    min-width: 50px;
+    font-size: 0.75rem;
+}
+
+.heatmap-value {
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    font-weight: 500;
+}
+
+.heatmap-value:hover {
+    transform: scale(1.1);
+    box-shadow: var(--shadow-sm);
+}
+
+.heatmap-value.very-high {
+    background: #2ECC40;
+    color: white;
+}
+
+.heatmap-value.high {
+    background: #B8D4B8;
+    color: var(--color-text);
+}
+
+.heatmap-value.medium {
+    background: #F4D8A8;
+    color: var(--color-text);
+}
+
+.heatmap-value.low {
+    background: #F1C6B7;
+    color: var(--color-text);
+}
+
+.heatmap-value.very-low {
+    background: #FFCCCB;
+    color: var(--color-text);
 }
 
 /* Head-to-Head Section */
@@ -912,8 +1001,34 @@ p {
 
 /* Responsive adjustments for new sections */
 @media (max-width: 640px) {
-    .podium-display {
-        grid-template-columns: 1fr;
+    .podium-team-name {
+        min-width: 100px;
+        font-size: 0.875rem;
+    }
+    
+    .podium-stats {
+        gap: var(--spacing-xs);
+    }
+    
+    .podium-stat {
+        min-width: 45px;
+    }
+    
+    .podium-stat-value {
+        font-size: 0.875rem;
+    }
+    
+    .podium-stat-label {
+        font-size: 0.5rem;
+    }
+    
+    .heatmap-cell {
+        padding: 4px;
+        font-size: 0.75rem;
+    }
+    
+    .heatmap-label {
+        min-width: 80px;
     }
     
     .h2h-table th,

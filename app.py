@@ -549,7 +549,7 @@ def api_points_distribution():
 
 @app.route('/api/team-comparison')
 def api_team_comparison():
-    """API endpoint for detailed team comparison stats - NOW WITH HITS"""
+    """API endpoint for detailed team comparison stats - NOW WITH HITS, COMPLETED GWs ONLY"""
     try:
         selected_teams = request.args.getlist('teams')
         
@@ -557,6 +557,9 @@ def api_team_comparison():
             return jsonify({'teams': []})
         
         conn = get_db_connection()
+        
+        # Get last completed gameweek
+        last_completed_gw = get_last_completed_gameweek()
         
         comparison_data = []
         
@@ -571,33 +574,33 @@ def api_team_comparison():
             if not team_info:
                 continue
             
-            # Total points
+            # Total points (completed GWs only)
             total_points = conn.execute('''
                 SELECT SUM(points) as total
                 FROM gameweek_points
-                WHERE entry_id = ?
-            ''', [team_id]).fetchone()
+                WHERE entry_id = ? AND gameweek <= ?
+            ''', [team_id, last_completed_gw]).fetchone()
             
-            # Average points per GW
+            # Average points per GW (completed GWs only)
             avg_points = conn.execute('''
                 SELECT AVG(points) as avg
                 FROM gameweek_points
-                WHERE entry_id = ?
-            ''', [team_id]).fetchone()
+                WHERE entry_id = ? AND gameweek <= ?
+            ''', [team_id, last_completed_gw]).fetchone()
             
-            # Highest GW score
+            # Highest GW score (completed GWs only)
             highest_gw = conn.execute('''
                 SELECT MAX(points) as highest
                 FROM gameweek_points
-                WHERE entry_id = ?
-            ''', [team_id]).fetchone()
+                WHERE entry_id = ? AND gameweek <= ?
+            ''', [team_id, last_completed_gw]).fetchone()
             
-            # Lowest GW score
+            # Lowest GW score (completed GWs only)
             lowest_gw = conn.execute('''
                 SELECT MIN(points) as lowest
                 FROM gameweek_points
-                WHERE entry_id = ?
-            ''', [team_id]).fetchone()
+                WHERE entry_id = ? AND gameweek <= ?
+            ''', [team_id, last_completed_gw]).fetchone()
             
             # Total transfers
             total_transfers = conn.execute('''
@@ -778,6 +781,57 @@ def api_biggest_movers():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/weekly-performance')
+def api_weekly_performance():
+    """API endpoint for weekly performance heatmap - uses total GW points"""
+    try:
+        selected_teams = request.args.getlist('teams')
+        last_completed_gw = get_last_completed_gameweek()
+        
+        conn = get_db_connection()
+        
+        if not selected_teams:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        placeholders = ','.join('?' * len(selected_teams))
+        
+        # Get total gameweek points
+        query = f'''
+            SELECT 
+                t.entry_id,
+                t.team_name,
+                gp.gameweek,
+                gp.points
+            FROM teams t
+            JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            WHERE t.entry_id IN ({placeholders}) AND gp.gameweek <= ?
+            ORDER BY t.entry_id, gp.gameweek
+        '''
+        rows = conn.execute(query, selected_teams + [last_completed_gw]).fetchall()
+        
+        conn.close()
+        
+        # Transform data for heatmap
+        teams_data = {}
+        for row in rows:
+            entry_id = row['entry_id']
+            if entry_id not in teams_data:
+                teams_data[entry_id] = {
+                    'team_name': row['team_name'],
+                    'gameweeks': []
+                }
+            teams_data[entry_id]['gameweeks'].append({
+                'gameweek': row['gameweek'],
+                'points': row['points']
+            })
+        
+        return jsonify({'teams': list(teams_data.values())})
+    except Exception as e:
+        logger.error(f"Error fetching weekly performance: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/head-to-head')
 def api_head_to_head():
     """API endpoint for head-to-head weekly wins"""
@@ -871,51 +925,89 @@ def api_head_to_head():
 
 @app.route('/api/differentials')
 def api_differentials():
-    """API endpoint for differential tracker - REAL DATA"""
+    """API endpoint for differential tracker - FILTER AWARE, calculates on-the-fly"""
     try:
         selected_teams = request.args.getlist('teams')
         
         conn = get_db_connection()
         
-        if not selected_teams:
+        if not selected_teams or len(selected_teams) < 2:
             conn.close()
             return jsonify({'teams': []})
         
-        # Get latest differential data for each team
-        differentials_data = []
+        # Get current gameweek
+        current_gw = get_current_gameweek()
         
-        for team_id in selected_teams:
-            team_info = conn.execute('''
-                SELECT t.team_name
-                FROM teams t
-                WHERE t.entry_id = ?
-            ''', [team_id]).fetchone()
-            
-            if not team_info:
-                continue
-            
-            # Get most recent differential data
-            diff_data = conn.execute('''
-                SELECT differential_players, differential_count
-                FROM differentials
-                WHERE entry_id = ?
-                ORDER BY gameweek DESC
-                LIMIT 1
-            ''', [team_id]).fetchone()
-            
-            if diff_data and diff_data['differential_players']:
-                players = diff_data['differential_players'].split(',')
+        placeholders = ','.join('?' * len(selected_teams))
+        
+        # Fetch current squads for selected teams
+        squad_rows = conn.execute(f'''
+            SELECT cs.entry_id, cs.player_ids, t.team_name
+            FROM current_squads cs
+            JOIN teams t ON cs.entry_id = t.entry_id
+            WHERE cs.entry_id IN ({placeholders})
+            AND cs.gameweek = ?
+        ''', selected_teams + [current_gw]).fetchall()
+        
+        if not squad_rows:
+            conn.close()
+            return jsonify({'teams': []})
+        
+        # Build squads dictionary
+        squads = {}
+        team_names = {}
+        for row in squad_rows:
+            entry_id = row['entry_id']
+            team_names[entry_id] = row['team_name']
+            if row['player_ids']:
+                squads[entry_id] = set(map(int, row['player_ids'].split(',')))
             else:
-                players = []
+                squads[entry_id] = set()
+        
+        # Calculate player ownership among SELECTED teams only
+        player_ownership = {}
+        for squad in squads.values():
+            for player_id in squad:
+                player_ownership[player_id] = player_ownership.get(player_id, 0) + 1
+        
+        # Get all unique player IDs
+        all_player_ids = set(player_ownership.keys())
+        
+        # Fetch player names
+        player_names_map = {}
+        if all_player_ids:
+            placeholders_players = ','.join('?' * len(all_player_ids))
+            player_rows = conn.execute(f'''
+                SELECT player_id, web_name
+                FROM players
+                WHERE player_id IN ({placeholders_players})
+            ''', list(all_player_ids)).fetchall()
             
-            differentials_data.append({
-                'team_name': team_info['team_name'],
-                'differential_count': diff_data['differential_count'] if diff_data else 0,
-                'recent_differentials': players[:5]  # Top 5
-            })
+            for row in player_rows:
+                player_names_map[row['player_id']] = row['web_name']
         
         conn.close()
+        
+        # Find differentials (owned by only 1 team in selection)
+        differentials_data = []
+        
+        for entry_id, squad in squads.items():
+            true_differentials = []
+            
+            for player_id in squad:
+                if player_ownership.get(player_id, 0) == 1:
+                    # This player is unique to this team (among selected teams)
+                    player_name = player_names_map.get(player_id, f'Player {player_id}')
+                    true_differentials.append(player_name)
+            
+            differentials_data.append({
+                'team_name': team_names[entry_id],
+                'differential_count': len(true_differentials),
+                'recent_differentials': true_differentials  # All unique players
+            })
+        
         return jsonify({'teams': differentials_data})
+        
     except Exception as e:
         logger.error(f"Error fetching differentials: {e}")
         return jsonify({'error': str(e)}), 500

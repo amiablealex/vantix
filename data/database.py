@@ -120,6 +120,29 @@ def init_db():
         )
     ''')
     
+    # Current squads table (stores full 15-player squad for each team)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS current_squads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER NOT NULL,
+            gameweek INTEGER NOT NULL,
+            player_ids TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (entry_id) REFERENCES teams (entry_id),
+            UNIQUE(entry_id, gameweek)
+        )
+    ''')
+    
+    # Players table (stores player ID to name mapping)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS players (
+            player_id INTEGER PRIMARY KEY,
+            web_name TEXT NOT NULL,
+            full_name TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     # Create indexes for better query performance
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_gameweek_points_entry 
@@ -139,6 +162,11 @@ def init_db():
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_differentials_entry 
         ON differentials(entry_id, gameweek)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_current_squads_entry 
+        ON current_squads(entry_id, gameweek)
     ''')
     
     conn.commit()

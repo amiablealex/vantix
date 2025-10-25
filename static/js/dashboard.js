@@ -391,9 +391,78 @@ function setupRefreshButton() {
 
 // Initialize all new features
 function initializeNewFeatures() {
+    initializeWeeklyHeatmap();
     initializeHeadToHead();
     initializeDifferentials();
     initializePodium();
+}
+
+// Initialize Weekly Performance Heatmap
+function initializeWeeklyHeatmap() {
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/weekly-performance?${queryString}`)
+        .then(response => response.json())
+        .then(data => {
+            renderWeeklyHeatmap(data.teams);
+        })
+        .catch(error => {
+            console.error('Error loading weekly heatmap:', error);
+        });
+}
+
+// Render Weekly Performance Heatmap
+function renderWeeklyHeatmap(teams) {
+    const container = document.getElementById('weeklyHeatmap');
+    
+    if (!teams || teams.length === 0) {
+        container.innerHTML = '<p class="text-center" style="color: var(--color-text-lighter);">No data available</p>';
+        return;
+    }
+    
+    // Get all unique gameweeks
+    const allGameweeks = [...new Set(teams.flatMap(team => 
+        team.gameweeks.map(gw => gw.gameweek)
+    ))].sort((a, b) => a - b);
+    
+    // Create heatmap HTML
+    let html = '<div class="heatmap-grid">';
+    
+    // Header row
+    html += '<div class="heatmap-row heatmap-header">';
+    html += '<div class="heatmap-cell heatmap-label">Team</div>';
+    allGameweeks.forEach(gw => {
+        html += `<div class="heatmap-cell heatmap-gw">GW${gw}</div>`;
+    });
+    html += '</div>';
+    
+    // Data rows
+    teams.forEach(team => {
+        html += '<div class="heatmap-row">';
+        html += `<div class="heatmap-cell heatmap-label">${team.team_name}</div>`;
+        
+        allGameweeks.forEach(gw => {
+            const gwData = team.gameweeks.find(g => g.gameweek === gw);
+            const points = gwData ? gwData.points : 0;
+            
+            // Color intensity based on points
+            let intensity = '';
+            if (points >= 80) intensity = 'very-high';
+            else if (points >= 60) intensity = 'high';
+            else if (points >= 45) intensity = 'medium';
+            else if (points >= 30) intensity = 'low';
+            else intensity = 'very-low';
+            
+            html += `<div class="heatmap-cell heatmap-value ${intensity}" title="${team.team_name} GW${gw}: ${points} pts">${points}</div>`;
+        });
+        
+        html += '</div>';
+    });
+    
+    html += '</div>';
+    
+    container.innerHTML = html;
 }
 
 // Initialize Head-to-Head
@@ -462,7 +531,7 @@ function initializeDifferentials() {
         });
 }
 
-// Display Differentials - True Unique Players Only
+// Display Differentials - True Unique Players Only, ALL shown
 function displayDifferentials(teams) {
     const container = document.getElementById('differentialsGrid');
     
@@ -484,11 +553,11 @@ function displayDifferentials(teams) {
             </div>
             ${cleanPlayers.length > 0 ? `
             <div class="differential-players">
-                ${cleanPlayers.slice(0, 5).map(player => 
+                ${cleanPlayers.map(player => 
                     `<span class="differential-player">${player}</span>`
                 ).join('')}
             </div>
-            ` : '<div class="differential-note">No unique players</div>'}
+            ` : '<div class="differential-note">No unique players among selected teams</div>'}
         </div>
         `;
     }).join('');
