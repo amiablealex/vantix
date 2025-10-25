@@ -52,6 +52,16 @@ def get_current_gameweek():
     return current['id'] if current else 1
 
 
+def get_last_completed_gameweek():
+    """Get the last completed (finished) gameweek"""
+    conn = get_db_connection()
+    last_completed = conn.execute(
+        'SELECT MAX(id) as max_gw FROM gameweeks WHERE finished = 1'
+    ).fetchone()
+    conn.close()
+    return last_completed['max_gw'] if last_completed and last_completed['max_gw'] else 1
+
+
 def get_season_string():
     """Get current FPL season string (e.g., '2024/25')"""
     now = datetime.now()
@@ -100,6 +110,7 @@ def api_cumulative_points():
     """API endpoint for cumulative points chart data"""
     try:
         selected_teams = request.args.getlist('teams')
+        last_completed_gw = get_last_completed_gameweek()
         
         conn = get_db_connection()
         
@@ -113,10 +124,10 @@ def api_cumulative_points():
                     SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as cumulative_points
                 FROM teams t
                 JOIN gameweek_points gp ON t.entry_id = gp.entry_id
-                WHERE t.entry_id IN ({placeholders})
+                WHERE t.entry_id IN ({placeholders}) AND gp.gameweek <= ?
                 ORDER BY gp.gameweek, t.team_name
             '''
-            rows = conn.execute(query, selected_teams).fetchall()
+            rows = conn.execute(query, selected_teams + [last_completed_gw]).fetchall()
         else:
             rows = conn.execute('''
                 SELECT 
@@ -126,8 +137,9 @@ def api_cumulative_points():
                     SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as cumulative_points
                 FROM teams t
                 JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                WHERE gp.gameweek <= ?
                 ORDER BY gp.gameweek, t.team_name
-            ''').fetchall()
+            ''', [last_completed_gw]).fetchall()
         
         conn.close()
         
@@ -158,6 +170,7 @@ def api_league_positions():
     """API endpoint for league position worm chart"""
     try:
         selected_teams = request.args.getlist('teams')
+        last_completed_gw = get_last_completed_gameweek()
         
         conn = get_db_connection()
         
@@ -172,7 +185,7 @@ def api_league_positions():
                         SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
-                    WHERE t.entry_id IN ({placeholders})
+                    WHERE t.entry_id IN ({placeholders}) AND gp.gameweek <= ?
                 ),
                 ranked AS (
                     SELECT 
@@ -185,7 +198,7 @@ def api_league_positions():
                 )
                 SELECT * FROM ranked ORDER BY gameweek, position
             '''
-            rows = conn.execute(query, selected_teams).fetchall()
+            rows = conn.execute(query, selected_teams + [last_completed_gw]).fetchall()
         else:
             rows = conn.execute('''
                 WITH cumulative_points AS (
@@ -196,6 +209,7 @@ def api_league_positions():
                         SUM(gp.points) OVER (PARTITION BY t.entry_id ORDER BY gp.gameweek) as total_points
                     FROM teams t
                     JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+                    WHERE gp.gameweek <= ?
                 ),
                 ranked AS (
                     SELECT 
@@ -207,21 +221,22 @@ def api_league_positions():
                     FROM cumulative_points
                 )
                 SELECT * FROM ranked ORDER BY gameweek, position
-            ''').fetchall()
+            ''', [last_completed_gw]).fetchall()
         
         # Get chip usage
         if selected_teams:
             chip_query = f'''
                 SELECT entry_id, gameweek, chip_name
                 FROM chip_usage
-                WHERE entry_id IN ({placeholders})
+                WHERE entry_id IN ({placeholders}) AND gameweek <= ?
             '''
-            chips = conn.execute(chip_query, selected_teams).fetchall()
+            chips = conn.execute(chip_query, selected_teams + [last_completed_gw]).fetchall()
         else:
             chips = conn.execute('''
                 SELECT entry_id, gameweek, chip_name
                 FROM chip_usage
-            ''').fetchall()
+                WHERE gameweek <= ?
+            ''', [last_completed_gw]).fetchall()
         
         conn.close()
         
@@ -321,48 +336,61 @@ def api_recent_transfers():
 
 @app.route('/api/stats')
 def api_stats():
-    """API endpoint for league statistics"""
+    """API endpoint for league statistics - NOW FILTERED BY SELECTED TEAMS"""
     try:
+        selected_teams = request.args.getlist('teams')
         conn = get_db_connection()
         
+        # Build WHERE clause for filtering
+        where_clause = ""
+        params = []
+        if selected_teams:
+            placeholders = ','.join('?' * len(selected_teams))
+            where_clause = f"WHERE t.entry_id IN ({placeholders})"
+            params = selected_teams
+        
         # Most goals scored
-        most_goals = conn.execute('''
+        most_goals = conn.execute(f'''
             SELECT t.team_name, ps.total_goals
             FROM teams t
             JOIN player_stats ps ON t.entry_id = ps.entry_id
+            {where_clause}
             ORDER BY ps.total_goals DESC
             LIMIT 1
-        ''').fetchone()
+        ''', params).fetchone()
         
         # Most clean sheets
-        most_clean_sheets = conn.execute('''
+        most_clean_sheets = conn.execute(f'''
             SELECT t.team_name, ps.total_clean_sheets
             FROM teams t
             JOIN player_stats ps ON t.entry_id = ps.entry_id
+            {where_clause}
             ORDER BY ps.total_clean_sheets DESC
             LIMIT 1
-        ''').fetchone()
+        ''', params).fetchone()
         
         # Highest gameweek score
-        highest_gw_score = conn.execute('''
+        highest_gw_score = conn.execute(f'''
             SELECT t.team_name, gp.gameweek, gp.points
             FROM teams t
             JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            {where_clause}
             ORDER BY gp.points DESC
             LIMIT 1
-        ''').fetchone()
+        ''', params).fetchone()
         
         # Current leader
-        current_leader = conn.execute('''
+        current_leader = conn.execute(f'''
             SELECT 
                 t.team_name,
                 SUM(gp.points) as total_points
             FROM teams t
             JOIN gameweek_points gp ON t.entry_id = gp.entry_id
+            {where_clause}
             GROUP BY t.entry_id
             ORDER BY total_points DESC
             LIMIT 1
-        ''').fetchone()
+        ''', params).fetchone()
         
         conn.close()
         
@@ -394,13 +422,12 @@ def api_stats():
 def api_form_chart():
     """API endpoint for recent form (last 5 gameweeks)"""
     try:
-        current_gw = get_current_gameweek()
-        
-        # Get the last completed gameweek (current might be in progress)
+        # Get the last completed gameweek
         conn = get_db_connection()
         last_completed = conn.execute('''
-            SELECT MAX(gameweek) as max_gw
-            FROM gameweek_points
+            SELECT MAX(id) as max_gw
+            FROM gameweeks
+            WHERE finished = 1
         ''').fetchone()
         
         if not last_completed or not last_completed['max_gw']:

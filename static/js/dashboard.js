@@ -1,6 +1,6 @@
 /**
  * Vantix Dashboard - Main JavaScript
- * Master filter coordination and data loading
+ * Master filter coordination and data loading - NOW FILTERS STATS TOO
  */
 
 // Global state
@@ -95,7 +95,7 @@ function setupMasterFilterListeners() {
                 this.classList.add('selected');
             }
             
-            // Update everything
+            // Update everything including stats
             updateAllVisualizations();
         });
     });
@@ -127,14 +127,18 @@ function setupMasterFilterListeners() {
 
 // Update all visualizations when filter changes
 function updateAllVisualizations() {
+    initializeStats(); // NOW UPDATES STATS TOO
     initializeAllCharts();
     initializeTransfers();
     initializeAnalytics();
 }
 
-// Load and display stats
+// Load and display stats - NOW FILTERED BY SELECTED TEAMS
 function initializeStats() {
-    fetch('/api/stats')
+    const selectedTeams = Array.from(VantixDashboard.selectedTeams);
+    const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
+    
+    fetch(`/api/stats?${queryString}`)
         .then(response => response.json())
         .then(data => {
             document.getElementById('stat-leader-value').textContent = data.current_leader.points;

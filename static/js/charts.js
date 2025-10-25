@@ -1,7 +1,27 @@
 /**
  * Vantix Dashboard - Charts
- * CLEAN VERSION - NO renderTeamPills function
+ * Updated with better hover markers and visible chip markers
  */
+
+// Render chip legend for league position chart
+function renderChipLegend() {
+    const legendContainer = document.getElementById('chipLegend');
+    if (!legendContainer) return;
+    
+    const chips = [
+        { name: 'Triple Captain', shape: 'star', symbol: '★' },
+        { name: 'Wildcard', shape: 'diamond', symbol: '◆' },
+        { name: 'Bench Boost', shape: 'triangle', symbol: '▲' },
+        { name: 'Free Hit', shape: 'square', symbol: '■' }
+    ];
+    
+    legendContainer.innerHTML = chips.map(chip => `
+        <span class="chip-legend-item">
+            <span class="chip-legend-symbol">${chip.symbol}</span>
+            <span class="chip-legend-label">${chip.name}</span>
+        </span>
+    `).join('');
+}
 
 // Initialize Cumulative Points Chart
 function initializeCumulativePointsChart() {
@@ -109,7 +129,27 @@ function initializeLeaguePositionChart() {
         });
 }
 
-// Render League Position Chart with DARK VISIBLE chip markers
+// Get chip marker shape based on chip name
+function getChipMarkerShape(chipName) {
+    const chipLower = chipName.toLowerCase();
+    if (chipLower.includes('wildcard') || chipLower === 'wildcard') return 'rectRot'; // Diamond
+    if (chipLower.includes('bench') || chipLower === 'bboost') return 'triangle';
+    if (chipLower.includes('captain') || chipLower === '3xc') return 'star';
+    if (chipLower.includes('free') || chipLower === 'freehit') return 'rect'; // Square
+    return 'star'; // Default
+}
+
+// Get chip display name
+function getChipDisplayName(chipName) {
+    const chipLower = chipName.toLowerCase();
+    if (chipLower.includes('wildcard') || chipLower === 'wildcard') return 'Wildcard';
+    if (chipLower.includes('bench') || chipLower === 'bboost') return 'Bench Boost';
+    if (chipLower.includes('captain') || chipLower === '3xc') return 'Triple Captain';
+    if (chipLower.includes('free') || chipLower === 'freehit') return 'Free Hit';
+    return chipName;
+}
+
+// Render League Position Chart with improved markers
 function renderLeaguePositionChart(teamsData) {
     const ctx = document.getElementById('leaguePositionChart');
     
@@ -122,35 +162,53 @@ function renderLeaguePositionChart(teamsData) {
         return;
     }
     
+    // Render chip legend
+    renderChipLegend();
+    
     const datasets = teamsData.map((team) => {
         const teamInfo = VantixDashboard.teams.find(t => t.team_name === team.team_name);
         const teamIndex = VantixDashboard.teams.indexOf(teamInfo);
         const color = getTeamColor(teamIndex);
         
+        // Determine point styles and radii based on chip type
         const pointStyles = team.data.map(point => {
-            return team.chips.find(c => c.gameweek === point.x) ? 'star' : 'circle';
+            const chip = team.chips.find(c => c.gameweek === point.x);
+            return chip ? getChipMarkerShape(chip.chip) : 'circle';
         });
         
         const pointRadii = team.data.map(point => {
-            return team.chips.find(c => c.gameweek === point.x) ? 12 : 0;
+            return team.chips.find(c => c.gameweek === point.x) ? 9 : 0;
         });
         
-        // SOLID BLACK for chip markers
-        const chipColor = '#000000';
+        // Use team color with slight darkening for chip markers
+        const chipMarkerColor = '#6B6B6B'; // Medium gray - fits the aesthetic
+        
+        // Point background colors - chip markers get gray, others use team color
+        const pointBackgroundColors = team.data.map(point => {
+            return team.chips.find(c => c.gameweek === point.x) ? chipMarkerColor : color;
+        });
+        
+        // Point border colors - subtle border for chip markers
+        const pointBorderColors = team.data.map(point => {
+            return team.chips.find(c => c.gameweek === point.x) ? '#3A3A3A' : '#FFFFFF';
+        });
         
         return {
             label: team.team_name,
             data: team.data,
             borderColor: color,
-            backgroundColor: chipColor,
+            backgroundColor: color + '20',
             borderWidth: 3,
             tension: 0.3,
             pointStyle: pointStyles,
             pointRadius: pointRadii,
-            pointHoverRadius: 14,
-            pointBackgroundColor: chipColor,
-            pointBorderColor: '#FFFFFF',
-            pointBorderWidth: 4
+            pointHoverRadius: 10,
+            pointBackgroundColor: pointBackgroundColors,
+            pointBorderColor: pointBorderColors,
+            pointBorderWidth: 2,
+            pointHoverBackgroundColor: color,
+            pointHoverBorderColor: '#FFFFFF',
+            pointHoverBorderWidth: 2
         };
     });
     
@@ -173,13 +231,17 @@ function renderLeaguePositionChart(teamsData) {
                     borderColor: '#E8DCC4',
                     borderWidth: 1,
                     padding: 12,
+                    displayColors: true,
                     callbacks: {
                         title: (context) => 'Gameweek ' + context[0].parsed.x,
                         label: (context) => {
                             const team = teamsData[context.datasetIndex];
                             const chipAtGW = team.chips.find(c => c.gameweek === context.parsed.x);
                             let label = context.dataset.label + ': Position ' + context.parsed.y;
-                            if (chipAtGW) label += ' ★ ' + chipAtGW.chip;
+                            if (chipAtGW) {
+                                const chipName = getChipDisplayName(chipAtGW.chip);
+                                label += ' • ' + chipName;
+                            }
                             return label;
                         }
                     }
@@ -265,6 +327,9 @@ function renderFormChart(teamsData) {
             pointBackgroundColor: color,
             pointBorderColor: '#FFFFFF',
             pointBorderWidth: 2,
+            pointHoverBackgroundColor: color,
+            pointHoverBorderColor: '#FFFFFF',
+            pointHoverBorderWidth: 2,
             fill: true
         };
     });
@@ -288,6 +353,7 @@ function renderFormChart(teamsData) {
                     borderColor: '#E8DCC4',
                     borderWidth: 1,
                     padding: 12,
+                    displayColors: true,
                     callbacks: {
                         title: (context) => 'Gameweek ' + context[0].parsed.x,
                         label: (context) => context.dataset.label + ': ' + context.parsed.y + ' pts'

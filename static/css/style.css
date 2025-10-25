@@ -4,7 +4,7 @@
  */
 
 /* Import Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght:600;700&family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@300;400;500;600&display=swap');
 
 /* CSS Variables */
 :root {
@@ -348,6 +348,36 @@ p {
     margin-bottom: var(--spacing-md);
 }
 
+/* Chip Legend */
+.chip-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--bg-secondary);
+    border-radius: var(--border-radius-sm);
+    border-left: 3px solid var(--color-text-light);
+}
+
+.chip-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--color-text-light);
+}
+
+.chip-legend-symbol {
+    font-size: 1rem;
+    color: var(--color-text);
+    font-weight: 600;
+}
+
+.chip-legend-label {
+    font-weight: 500;
+}
+
 @media (max-width: 640px) {
     .chart-section {
         padding: var(--spacing-md);
@@ -355,6 +385,15 @@ p {
     
     .chart-container {
         height: 280px;
+    }
+    
+    .chip-legend {
+        gap: var(--spacing-sm);
+        padding: var(--spacing-xs);
+    }
+    
+    .chip-legend-item {
+        font-size: 0.75rem;
     }
 }
 
