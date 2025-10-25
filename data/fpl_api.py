@@ -51,10 +51,16 @@ class FPLDataCollector:
         url = f"{self.BASE_URL}/entry/{entry_id}/history/"
         return self._make_request(url)
     
-    def get_entry_picks(self, entry_id, gameweek):
-        """Fetch team's picks for a specific gameweek"""
+    def get_entry_event_live(self, entry_id, gameweek):
+        """Fetch live data for a team in a specific gameweek (includes player points)"""
         url = f"{self.BASE_URL}/entry/{entry_id}/event/{gameweek}/picks/"
         return self._make_request(url)
+    
+    def get_entry_picks(self, entry_id, gameweek):
+        """Alias for get_entry_event_live"""
+        return self.get_entry_event_live(entry_id, gameweek)
+
+
     
     def get_entry_transfers(self, entry_id):
         """Fetch team's transfer history"""
@@ -199,80 +205,7 @@ class FPLDataCollector:
                             ','.join(data['out'])
                         ))
                     
-                    # NEW: Collect captain and position data for each completed gameweek
-                    for gw in history['current']:
-                        gameweek_num = gw['event']
-                        
-                        # Check if gameweek is finished
-                        is_finished = cursor.execute(
-                            'SELECT finished FROM gameweeks WHERE id = ?',
-                            [gameweek_num]
-                        ).fetchone()
-                        
-                        if is_finished and is_finished['finished']:
-                            try:
-                                picks_data = self.get_entry_picks(entry_id, gameweek_num)
-                                
-                                # Track captain and position points
-                                captain_id = None
-                                captain_name = None
-                                captain_points = 0
-                                position_points = {'GK': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
-                                position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
-                                
-                                for pick in picks_data['picks']:
-                                    player_id = pick['element']
-                                    multiplier = pick['multiplier']
-                                    
-                                    # Get player details
-                                    player_info = self.player_details.get(player_id, {})
-                                    position_type = player_info.get('position', 2)
-                                    position = position_map.get(position_type, 'DEF')
-                                    
-                                    # Points for this player (multiplier already applied in pick)
-                                    player_points = multiplier * pick.get('points', 0) if 'points' in pick else 0
-                                    
-                                    # Track captain
-                                    if pick['is_captain']:
-                                        captain_id = player_id
-                                        captain_name = player_info.get('name', 'Unknown')
-                                        captain_points = player_points
-                                    
-                                    # Add to position totals
-                                    position_points[position] += player_points
-                                
-                                # Store captain choice
-                                if captain_id:
-                                    cursor.execute('''
-                                        INSERT OR REPLACE INTO captain_choices
-                                        (entry_id, gameweek, player_id, player_name, captain_points)
-                                        VALUES (?, ?, ?, ?, ?)
-                                    ''', (entry_id, gameweek_num, captain_id, captain_name, captain_points))
-                                
-                                # Store position breakdown
-                                cursor.execute('''
-                                    INSERT OR REPLACE INTO position_points
-                                    (entry_id, gameweek, gk_points, def_points, mid_points, fwd_points)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                ''', (
-                                    entry_id, gameweek_num,
-                                    position_points['GK'],
-                                    position_points['DEF'],
-                                    position_points['MID'],
-                                    position_points['FWD']
-                                ))
-                                
-                            except Exception as e:
-                                logger.warning(f"Could not fetch picks for GW{gameweek_num}: {e}")
-                    
-                    # Store current squad for differential analysis
-                    try:
-                        current_picks = self.get_entry_picks(entry_id, current_gw)
-                        all_squads[entry_id] = [pick['element'] for pick in current_picks['picks']]
-                    except Exception as e:
-                        logger.warning(f"Could not fetch current picks for differential: {e}")
-                    
-                    # Calculate cumulative player stats for this manager
+                    # Store cumulative player stats for this manager
                     total_goals = 0
                     total_assists = 0
                     total_clean_sheets = 0
@@ -302,30 +235,35 @@ class FPLDataCollector:
                         datetime.now()
                     ))
                     
+                    # Store current squad for differential analysis
+                    try:
+                        current_picks = self.get_entry_picks(entry_id, current_gw)
+                        all_squads[entry_id] = [pick['element'] for pick in current_picks['picks']]
+                    except Exception as e:
+                        logger.warning(f"Could not fetch current picks for differential: {e}")
+                    
                 except Exception as e:
                     logger.error(f"Error collecting data for team {entry_id}: {e}")
                     continue
             
-            # 4. Calculate differentials (players owned by <50% of league)
+            # 4. Calculate differentials (players owned by ONLY this team, not by anyone else)
             if len(all_squads) > 0:
-                logger.info("Calculating differentials...")
+                logger.info("Calculating true differentials...")
                 
                 player_ownership = {}
                 for squad in all_squads.values():
                     for player_id in squad:
                         player_ownership[player_id] = player_ownership.get(player_id, 0) + 1
                 
-                total_teams = len(all_squads)
-                
                 for entry_id, squad in all_squads.items():
-                    differentials = []
+                    true_differentials = []
                     for player_id in squad:
                         ownership_count = player_ownership.get(player_id, 0)
-                        ownership_pct = (ownership_count / total_teams) * 100
                         
-                        if ownership_pct < 50:  # Differential = owned by less than 50%
+                        # TRUE differential = only owned by this team (count == 1)
+                        if ownership_count == 1:
                             player_name = self.player_map.get(player_id, 'Unknown')
-                            differentials.append(f"{player_name} ({ownership_pct:.0f}%)")
+                            true_differentials.append(player_name)
                     
                     cursor.execute('''
                         INSERT OR REPLACE INTO differentials
@@ -334,8 +272,8 @@ class FPLDataCollector:
                     ''', (
                         entry_id,
                         current_gw,
-                        ','.join(differentials) if differentials else '',
-                        len(differentials)
+                        ','.join(true_differentials) if true_differentials else '',
+                        len(true_differentials)
                     ))
             
             conn.commit()

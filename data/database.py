@@ -106,38 +106,7 @@ def init_db():
         )
     ''')
     
-    # NEW: Captain choices table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS captain_choices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_id INTEGER NOT NULL,
-            gameweek INTEGER NOT NULL,
-            player_id INTEGER NOT NULL,
-            player_name TEXT NOT NULL,
-            captain_points INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (entry_id) REFERENCES teams (entry_id),
-            UNIQUE(entry_id, gameweek)
-        )
-    ''')
-    
-    # NEW: Position points breakdown table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS position_points (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_id INTEGER NOT NULL,
-            gameweek INTEGER NOT NULL,
-            gk_points INTEGER DEFAULT 0,
-            def_points INTEGER DEFAULT 0,
-            mid_points INTEGER DEFAULT 0,
-            fwd_points INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (entry_id) REFERENCES teams (entry_id),
-            UNIQUE(entry_id, gameweek)
-        )
-    ''')
-    
-    # NEW: Differentials table
+    # Differentials table (players unique to each team)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS differentials (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,16 +137,6 @@ def init_db():
     ''')
     
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_captain_choices_entry 
-        ON captain_choices(entry_id, gameweek)
-    ''')
-    
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_position_points_entry 
-        ON position_points(entry_id, gameweek)
-    ''')
-    
-    cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_differentials_entry 
         ON differentials(entry_id, gameweek)
     ''')
@@ -194,8 +153,6 @@ def clear_data():
     cursor = conn.cursor()
     
     cursor.execute('DELETE FROM differentials')
-    cursor.execute('DELETE FROM position_points')
-    cursor.execute('DELETE FROM captain_choices')
     cursor.execute('DELETE FROM player_stats')
     cursor.execute('DELETE FROM chip_usage')
     cursor.execute('DELETE FROM transfers')
