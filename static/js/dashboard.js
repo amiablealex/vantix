@@ -257,7 +257,7 @@ function initializeComparison() {
         });
 }
 
-// Display team comparison
+// Display team comparison with min/max highlighting
 function displayComparison(teams) {
     const container = document.getElementById('comparisonGrid');
     
@@ -266,36 +266,63 @@ function displayComparison(teams) {
         return;
     }
     
+    // Calculate min/max for each stat
+    const stats = {
+        total_points: { values: teams.map(t => t.total_points), higherIsBetter: true },
+        avg_points: { values: teams.map(t => t.avg_points), higherIsBetter: true },
+        highest_gw: { values: teams.map(t => t.highest_gw), higherIsBetter: true },
+        lowest_gw: { values: teams.map(t => t.lowest_gw), higherIsBetter: false },
+        total_transfers: { values: teams.map(t => t.total_transfers), higherIsBetter: true },
+        hits_taken: { values: teams.map(t => t.hits_taken), higherIsBetter: false },
+        chips_used: { values: teams.map(t => t.chips_used), higherIsBetter: false }
+    };
+    
+    // Helper function to get highlight class
+    function getHighlightClass(value, statKey) {
+        const stat = stats[statKey];
+        const max = Math.max(...stat.values);
+        const min = Math.min(...stat.values);
+        
+        if (stat.higherIsBetter) {
+            if (value === max) return 'highlight-best';
+            if (value === min) return 'highlight-worst';
+        } else {
+            if (value === min) return 'highlight-best';
+            if (value === max) return 'highlight-worst';
+        }
+        return '';
+    }
+    
     container.innerHTML = teams.map(team => `
         <div class="comparison-card">
             <div class="comparison-team-name">${team.team_name}</div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Total Points</span>
-                <span class="comparison-stat-value">${team.total_points}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.total_points, 'total_points')}">${team.total_points}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Avg Per GW</span>
-                <span class="comparison-stat-value">${team.avg_points}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.avg_points, 'avg_points')}">${team.avg_points}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Highest GW</span>
-                <span class="comparison-stat-value">${team.highest_gw}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.highest_gw, 'highest_gw')}">${team.highest_gw}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Lowest GW</span>
-                <span class="comparison-stat-value">${team.lowest_gw}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.lowest_gw, 'lowest_gw')}">${team.lowest_gw}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Total Transfers</span>
-                <span class="comparison-stat-value">${team.total_transfers}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.total_transfers, 'total_transfers')}">${team.total_transfers}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Hits Taken</span>
-                <span class="comparison-stat-value">${team.hits_taken}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.hits_taken, 'hits_taken')}">${team.hits_taken}</span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Chips Used</span>
-                <span class="comparison-stat-value">${team.chips_used}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.chips_used, 'chips_used')}">${team.chips_used}</span>
             </div>
         </div>
     `).join('');
@@ -578,7 +605,7 @@ function initializePodium() {
         });
 }
 
-// Display Podium - Condensed Format
+// Display Podium - Table Format
 function displayPodium(podium) {
     const container = document.getElementById('podiumDisplay');
     
@@ -588,32 +615,35 @@ function displayPodium(podium) {
     }
     
     const medals = ['🥇', '🥈', '🥉'];
-    const positions = ['first', 'second', 'third'];
     
-    container.innerHTML = podium.map((team, index) => `
-        <div class="podium-card podium-${positions[index]}">
-            <div class="podium-medal">${medals[index]}</div>
-            <div class="podium-info">
-                <div class="podium-team-name">${team.team_name}</div>
-                <div class="podium-stats">
-                    <div class="podium-stat">
-                        <span class="podium-stat-value">${team.total_points}</span>
-                        <span class="podium-stat-label">Points</span>
-                    </div>
-                    <div class="podium-stat">
-                        <span class="podium-stat-value">${team.recent_form}</span>
-                        <span class="podium-stat-label">Form</span>
-                    </div>
-                    ${team.gap > 0 ? `
-                    <div class="podium-stat">
-                        <span class="podium-stat-value">-${team.gap}</span>
-                        <span class="podium-stat-label">Gap</span>
-                    </div>
-                    ` : ''}
-                </div>
-            </div>
-        </div>
-    `).join('');
+    let html = `
+        <table class="podium-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Team</th>
+                    <th style="text-align: center;">Points</th>
+                    <th style="text-align: center;">Form</th>
+                    <th style="text-align: center;">Gap</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    podium.forEach((team, index) => {
+        html += `
+            <tr>
+                <td class="podium-rank">${medals[index]}</td>
+                <td class="podium-team">${team.team_name}</td>
+                <td class="podium-points">${team.total_points}</td>
+                <td class="podium-form">${team.recent_form}</td>
+                <td class="podium-gap">${team.gap > 0 ? `-${team.gap}` : '-'}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 // Show error message
