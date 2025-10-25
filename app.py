@@ -1,44 +1,65 @@
 """
 Vantix - Fantasy Premier League Dashboard
-Main Flask Application
+Main Flask Application (Production Optimized)
 """
 
 from flask import Flask, render_template, jsonify, request
+from flask_caching import Cache
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from datetime import datetime
 import logging
+import os
+import requests
+from functools import wraps
+
 from data.database import init_db, get_db_connection, get_league_connection, get_league_db_path
-from data.scheduler import init_scheduler
 from data.fpl_api import FPLDataCollector
 import config
-import os
 
 # Configure logging
+os.makedirs(os.path.dirname(config.LOG_FILE), exist_ok=True)
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, config.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config.LOG_FILE),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config.from_object(config)
 
+# Initialize Flask-Caching
+cache = Cache(app)
+
+# Initialize Flask-Limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=[config.RATELIMIT_DEFAULT],
+    storage_uri=config.RATELIMIT_STORAGE_URL,
+    strategy=config.RATELIMIT_STRATEGY
+)
+
 # Initialize database
 init_db()
 
-# Initialize scheduler for data updates
-scheduler = init_scheduler(app)
+# Global refresh lock
+_refresh_lock = {}
 
+# ==================== HELPER FUNCTIONS ====================
 
 def get_current_gameweek(league_code=None):
     """Get the current active gameweek"""
     conn = get_league_connection(league_code) if league_code else get_db_connection()
-    # Find first unfinished gameweek
     current = conn.execute(
         'SELECT id FROM gameweeks WHERE finished = 0 ORDER BY id LIMIT 1'
     ).fetchone()
     
     if not current:
-        # All finished, get last gameweek
         current = conn.execute(
             'SELECT id FROM gameweeks ORDER BY id DESC LIMIT 1'
         ).fetchone()
@@ -60,7 +81,7 @@ def get_last_completed_gameweek(league_code=None):
 def get_season_string():
     """Get current FPL season string (e.g., '2024/25')"""
     now = datetime.now()
-    if now.month >= 8:  # Season starts in August
+    if now.month >= 8:
         return f"{now.year}/{str(now.year + 1)[-2:]}"
     else:
         return f"{now.year - 1}/{str(now.year)[-2:]}"
@@ -89,7 +110,110 @@ def format_time_ago(timestamp_str):
         return "Unknown"
 
 
+def check_fpl_api_updated():
+    """Check if FPL API has new data by comparing current GW status"""
+    try:
+        response = requests.get(
+            'https://fantasy.premierleague.com/api/bootstrap-static/',
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Get current event
+        current_event = next(
+            (e for e in data['events'] if not e['finished']),
+            data['events'][-1] if data['events'] else None
+        )
+        
+        if not current_event:
+            return False, "No gameweek data available"
+        
+        # Check if current GW is finished but not yet updated in DB
+        return current_event, None
+        
+    except Exception as e:
+        logger.error(f"Error checking FPL API: {e}")
+        return False, str(e)
+
+
+def is_refresh_needed(league_code):
+    """Smart refresh logic - check if refresh is actually needed"""
+    try:
+        # Check FPL API current gameweek status
+        fpl_current, error = check_fpl_api_updated()
+        if error:
+            return False, f"Cannot check FPL API: {error}"
+        
+        if not fpl_current:
+            return False, "No FPL data available"
+        
+        # Get our database status
+        conn = get_league_connection(league_code)
+        
+        # Get last updated time
+        last_update = conn.execute(
+            'SELECT MAX(created_at) as last_update FROM gameweek_points'
+        ).fetchone()
+        
+        if not last_update or not last_update['last_update']:
+            conn.close()
+            return True, "No data in database yet"
+        
+        # Get latest gameweek in DB
+        latest_gw = conn.execute(
+            'SELECT MAX(id) as max_gw FROM gameweeks WHERE finished = 1'
+        ).fetchone()
+        
+        conn.close()
+        
+        db_latest_finished_gw = latest_gw['max_gw'] if latest_gw else 0
+        fpl_current_gw = fpl_current['id']
+        fpl_is_finished = fpl_current['finished']
+        
+        # If FPL current GW is finished but we don't have it yet, refresh needed
+        if fpl_is_finished and db_latest_finished_gw < fpl_current_gw:
+            return True, f"GW{fpl_current_gw} finished but not in database"
+        
+        # Check if data is stale (>6 hours old)
+        last_update_time = datetime.fromisoformat(
+            last_update['last_update'].replace('Z', '+00:00')
+        )
+        now = datetime.now(last_update_time.tzinfo) if last_update_time.tzinfo else datetime.now()
+        hours_since_update = (now - last_update_time).total_seconds() / 3600
+        
+        if hours_since_update > 6:
+            return True, f"Data is {hours_since_update:.1f} hours old"
+        
+        return False, "Data is up to date"
+        
+    except Exception as e:
+        logger.error(f"Error checking refresh need: {e}")
+        return False, f"Error: {str(e)}"
+
+
+def require_refresh_token(f):
+    """Decorator to protect refresh endpoints with token"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('X-Refresh-Token') or request.args.get('token')
+        
+        if not token or token != config.REFRESH_TOKEN:
+            logger.warning(f"Unauthorized refresh attempt from {get_remote_address()}")
+            return jsonify({
+                'status': 'error',
+                'message': 'Unauthorized. Valid refresh token required.'
+            }), 401
+        
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+
+# ==================== ROUTES ====================
+
 @app.route('/')
+@limiter.limit("60 per minute")
 def league_list():
     """Landing page with all configured leagues"""
     leagues_info = []
@@ -131,6 +255,7 @@ def league_list():
 
 
 @app.route('/<int:league_code>')
+@limiter.limit("60 per minute")
 def dashboard_league(league_code):
     """Dashboard for specific league"""
     league_config = next((l for l in config.LEAGUES if l['code'] == league_code), None)
@@ -143,15 +268,12 @@ def dashboard_league(league_code):
         return render_template('error.html', 
             error=f'No data for league {league_code}. Run collect_all_leagues.py first.'), 404
 
-    # CRITICAL FIX: Fetch teams data
     conn = get_league_connection(league_code)
     teams = conn.execute('SELECT * FROM teams ORDER BY team_name').fetchall()
-    teams = [dict(team) for team in teams]  # Convert to list of dicts
+    teams = [dict(team) for team in teams]
     
-    # Get current gameweek
     current_gw = get_current_gameweek(league_code)
     
-    # Get last update time
     last_update_row = conn.execute(
         'SELECT MAX(created_at) as last_update FROM gameweek_points'
     ).fetchone()
@@ -169,7 +291,11 @@ def dashboard_league(league_code):
     )
 
 
+# ==================== API ENDPOINTS (All with Caching) ====================
+
 @app.route('/api/<int:league_code>/cumulative-points')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_cumulative_points(league_code):
     """API endpoint for cumulative points chart data"""
     try:
@@ -207,7 +333,6 @@ def api_cumulative_points(league_code):
         
         conn.close()
         
-        # Transform data for Chart.js
         teams_data = {}
         for row in rows:
             entry_id = row['entry_id']
@@ -221,15 +346,15 @@ def api_cumulative_points(league_code):
                 'y': row['cumulative_points']
             })
         
-        return jsonify({
-            'teams': list(teams_data.values())
-        })
+        return jsonify({'teams': list(teams_data.values())})
     except Exception as e:
         logger.error(f"Error fetching cumulative points: {e}")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/<int:league_code>/league-positions')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_league_positions(league_code):
     """API endpoint for league position worm chart"""
     try:
@@ -287,7 +412,6 @@ def api_league_positions(league_code):
                 SELECT * FROM ranked ORDER BY gameweek, position
             ''', [last_completed_gw]).fetchall()
         
-        # Get chip usage
         if selected_teams:
             chip_query = f'''
                 SELECT entry_id, gameweek, chip_name
@@ -304,7 +428,6 @@ def api_league_positions(league_code):
         
         conn.close()
         
-        # Transform data
         teams_data = {}
         for row in rows:
             entry_id = row['entry_id']
@@ -319,7 +442,6 @@ def api_league_positions(league_code):
                 'y': row['position']
             })
         
-        # Add chip markers
         for chip in chips:
             if chip['entry_id'] in teams_data:
                 teams_data[chip['entry_id']]['chips'].append({
@@ -327,15 +449,15 @@ def api_league_positions(league_code):
                     'chip': chip['chip_name']
                 })
         
-        return jsonify({
-            'teams': list(teams_data.values())
-        })
+        return jsonify({'teams': list(teams_data.values())})
     except Exception as e:
         logger.error(f"Error fetching league positions: {e}")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/<int:league_code>/recent-transfers')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_recent_transfers(league_code):
     """API endpoint for recent transfers"""
     try:
@@ -399,13 +521,14 @@ def api_recent_transfers(league_code):
 
 
 @app.route('/api/<int:league_code>/stats')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_stats(league_code):
-    """API endpoint for league statistics - NOW FILTERED BY SELECTED TEAMS"""
+    """API endpoint for league statistics"""
     try:
         selected_teams = request.args.getlist('teams')
         conn = get_league_connection(league_code)
         
-        # Build WHERE clause for filtering
         where_clause = ""
         params = []
         if selected_teams:
@@ -413,7 +536,6 @@ def api_stats(league_code):
             where_clause = f"WHERE t.entry_id IN ({placeholders})"
             params = selected_teams
         
-        # Most goals scored
         most_goals = conn.execute(f'''
             SELECT t.team_name, ps.total_goals
             FROM teams t
@@ -423,7 +545,6 @@ def api_stats(league_code):
             LIMIT 1
         ''', params).fetchone()
         
-        # Most clean sheets
         most_clean_sheets = conn.execute(f'''
             SELECT t.team_name, ps.total_clean_sheets
             FROM teams t
@@ -433,7 +554,6 @@ def api_stats(league_code):
             LIMIT 1
         ''', params).fetchone()
         
-        # Highest gameweek score
         highest_gw_score = conn.execute(f'''
             SELECT t.team_name, gp.gameweek, gp.points
             FROM teams t
@@ -443,7 +563,6 @@ def api_stats(league_code):
             LIMIT 1
         ''', params).fetchone()
         
-        # Current leader
         current_leader = conn.execute(f'''
             SELECT 
                 t.team_name,
@@ -483,6 +602,8 @@ def api_stats(league_code):
 
 
 @app.route('/api/<int:league_code>/form-chart')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_form_chart(league_code):
     """API endpoint for recent form (last 5 gameweeks)"""
     try:
@@ -545,17 +666,17 @@ def api_form_chart(league_code):
                 'y': row['points']
             })
         
-        return jsonify({
-            'teams': list(teams_data.values())
-        })
+        return jsonify({'teams': list(teams_data.values())})
     except Exception as e:
         logger.error(f"Error fetching form chart: {e}")
         return jsonify({'error': str(e), 'teams': []}), 500
 
 
 @app.route('/api/<int:league_code>/points-distribution')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_points_distribution(league_code):
-    """API endpoint for points distribution across all gameweeks"""
+    """API endpoint for points distribution"""
     try:
         selected_teams = request.args.getlist('teams')
         
@@ -608,6 +729,8 @@ def api_points_distribution(league_code):
 
 
 @app.route('/api/<int:league_code>/team-comparison')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_team_comparison(league_code):
     """API endpoint for detailed team comparison stats"""
     try:
@@ -694,8 +817,10 @@ def api_team_comparison(league_code):
 
 
 @app.route('/api/<int:league_code>/biggest-movers')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_biggest_movers(league_code):
-    """API endpoint for biggest position changes in last 5 GWs"""
+    """API endpoint for biggest position changes"""
     try:
         last_completed_gw = get_last_completed_gameweek(league_code)
         past_gw = max(1, last_completed_gw - 5)
@@ -830,6 +955,8 @@ def api_biggest_movers(league_code):
 
 
 @app.route('/api/<int:league_code>/weekly-performance')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_weekly_performance(league_code):
     """API endpoint for weekly performance heatmap"""
     try:
@@ -879,6 +1006,8 @@ def api_weekly_performance(league_code):
 
 
 @app.route('/api/<int:league_code>/head-to-head')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_head_to_head(league_code):
     """API endpoint for head-to-head weekly wins"""
     try:
@@ -962,6 +1091,8 @@ def api_head_to_head(league_code):
 
 
 @app.route('/api/<int:league_code>/differentials')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_differentials(league_code):
     """API endpoint for differential tracker"""
     try:
@@ -1044,6 +1175,8 @@ def api_differentials(league_code):
 
 
 @app.route('/api/<int:league_code>/podium')
+@limiter.limit("120 per minute")
+@cache.cached(timeout=300, query_string=True)
 def api_podium(league_code):
     """API endpoint for top 3 podium"""
     try:
@@ -1107,39 +1240,168 @@ def api_podium(league_code):
         return jsonify({'error': str(e)}), 500
 
 
+# ==================== REFRESH ENDPOINTS (Token Protected) ====================
+
 @app.route('/api/<int:league_code>/refresh', methods=['POST'])
+@limiter.limit("3 per hour")
+@require_refresh_token
 def api_refresh_league(league_code):
-    """Refresh specific league"""
+    """Refresh specific league (token protected)"""
     try:
         league_config = next((l for l in config.LEAGUES if l['code'] == league_code), None)
         if not league_config:
             return jsonify({'status': 'error', 'message': 'League not found'}), 404
         
-        logger.info(f"Refreshing league {league_code}")
-        collector = FPLDataCollector(team_id=None, league_id=league_code)
-        collector.collect_all_data()
+        # Check if refresh is needed
+        refresh_needed, reason = is_refresh_needed(league_code)
+        if not refresh_needed:
+            return jsonify({
+                'status': 'skipped',
+                'message': f'Refresh not needed: {reason}'
+            })
         
-        return jsonify({'status': 'success', 'message': f'League {league_code} refreshed'})
+        # Check lock
+        if _refresh_lock.get(league_code, False):
+            return jsonify({
+                'status': 'error',
+                'message': 'Refresh already in progress'
+            }), 409
+        
+        _refresh_lock[league_code] = True
+        
+        try:
+            logger.info(f"Refreshing league {league_code}: {reason}")
+            collector = FPLDataCollector(team_id=None, league_id=league_code)
+            collector.collect_all_data()
+            
+            # Clear cache for this league
+            cache.clear()
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'League {league_code} refreshed successfully',
+                'reason': reason
+            })
+        finally:
+            _refresh_lock[league_code] = False
+            
     except Exception as e:
         logger.error(f"Error refreshing league {league_code}: {e}")
+        _refresh_lock[league_code] = False
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 @app.route('/api/refresh-all', methods=['POST'])
+@limiter.limit("1 per hour")
+@require_refresh_token
 def api_refresh_all():
-    """Refresh all configured leagues"""
+    """Refresh all configured leagues (token protected)"""
     try:
         logger.info("Refreshing all leagues")
-        for league in config.LEAGUES:
-            logger.info(f"Refreshing league {league['code']}")
-            collector = FPLDataCollector(team_id=None, league_id=league['code'])
-            collector.collect_all_data()
+        results = []
         
-        return jsonify({'status': 'success', 'message': 'All leagues refreshed'})
+        for league in config.LEAGUES:
+            league_code = league['code']
+            
+            # Check if refresh needed
+            refresh_needed, reason = is_refresh_needed(league_code)
+            
+            if not refresh_needed:
+                results.append({
+                    'league_code': league_code,
+                    'status': 'skipped',
+                    'reason': reason
+                })
+                continue
+            
+            # Check lock
+            if _refresh_lock.get(league_code, False):
+                results.append({
+                    'league_code': league_code,
+                    'status': 'error',
+                    'reason': 'Refresh already in progress'
+                })
+                continue
+            
+            _refresh_lock[league_code] = True
+            
+            try:
+                logger.info(f"Refreshing league {league_code}: {reason}")
+                collector = FPLDataCollector(team_id=None, league_id=league_code)
+                collector.collect_all_data()
+                
+                results.append({
+                    'league_code': league_code,
+                    'status': 'success',
+                    'reason': reason
+                })
+            except Exception as e:
+                logger.error(f"Error refreshing league {league_code}: {e}")
+                results.append({
+                    'league_code': league_code,
+                    'status': 'error',
+                    'reason': str(e)
+                })
+            finally:
+                _refresh_lock[league_code] = False
+        
+        # Clear all cache
+        cache.clear()
+        
+        return jsonify({
+            'status': 'completed',
+            'message': 'Refresh process completed',
+            'results': results
+        })
     except Exception as e:
         logger.error(f"Error refreshing all leagues: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+# ==================== HEALTH CHECK ====================
+
+@app.route('/health')
+@limiter.exempt
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check if leagues configured
+        if not config.LEAGUES:
+            return jsonify({
+                'status': 'warning',
+                'message': 'No leagues configured',
+                'timestamp': datetime.now().isoformat()
+            }), 200
+        
+        # Check if at least one league DB exists
+        leagues_status = []
+        for league in config.LEAGUES:
+            db_path = get_league_db_path(league['code'])
+            exists = os.path.exists(db_path)
+            leagues_status.append({
+                'code': league['code'],
+                'name': league['name'],
+                'database_exists': exists
+            })
+        
+        all_exist = all(l['database_exists'] for l in leagues_status)
+        
+        return jsonify({
+            'status': 'healthy' if all_exist else 'degraded',
+            'leagues': leagues_status,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+# ==================== ERROR HANDLERS ====================
 
 @app.errorhandler(404)
 def not_found(e):
@@ -1151,5 +1413,13 @@ def server_error(e):
     return render_template('error.html', error='Internal server error'), 500
 
 
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        'error': 'Rate limit exceeded',
+        'message': str(e.description)
+    }), 429
+
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=config.DEBUG, host='0.0.0.0', port=5000)
