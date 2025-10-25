@@ -20,10 +20,16 @@ class FPLDataCollector:
     def __init__(self, team_id, league_id):
         self.team_id = team_id
         self.league_id = league_id
+        self.league_code = league_id  # Store as league_code for clarity
         self.session = requests.Session()
         self.player_map = {}  # Cache for player ID to name mapping
         self.player_details = {}  # Cache for full player details
         self.current_season_start_gw = 1  # FPL seasons always start at GW1
+        
+    def _get_db_connection(self):
+        """Get database connection for this league"""
+        from data.database import get_league_connection
+        return get_league_connection(self.league_code)
         
     def _make_request(self, url):
         """Make API request with rate limiting and error handling"""
@@ -81,9 +87,9 @@ class FPLDataCollector:
     
     def collect_all_data(self):
         """Main method to collect all FPL data and store in database"""
-        logger.info("Starting data collection...")
+        logger.info(f"Starting data collection for league {self.league_code}...")
         
-        conn = get_db_connection()
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         
         try:

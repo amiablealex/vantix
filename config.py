@@ -1,14 +1,28 @@
-"""
-Vantix Configuration
-Update these values with your FPL details
-"""
+import os
 
-# FPL API Configuration
-FPL_TEAM_ID = 5699556  # Your FPL Team ID (entry ID)
-FPL_LEAGUE_ID = 1507022  # Your Classic League ID
+# Application Configuration
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-# League display name (will be fetched from API but can be overridden here)
-LEAGUE_NAME = "Code vs Coach"
+# Multiple League Support - Add your leagues here
+LEAGUES = [
+    {
+        'code': 1507022,  # Replace with your first league code
+        'name': 'Code vs Coach',
+        'description': 'My primary FPL league'
+    },
+    {
+        'code': 307899,  # Replace with your first league code
+        'name': 'The Dandy Lions',
+        'description': 'My secondary FPL league'
+    },
+    # Add more leagues as needed:
+    # {
+    #     'code': 456789,
+    #     'name': 'Work League', 
+    #     'description': 'Office competition'
+    # },
+]
 
 # Data refresh schedule (cron format: minute hour day month day_of_week)
 # Default: Every Tuesday at 3:00 AM (after GW deadline typically passes)
@@ -18,13 +32,13 @@ REFRESH_SCHEDULE = {
     'day_of_week': 'tue'
 }
 
-# Application settings
-SECRET_KEY = 'your-secret-key-change-this-in-production'
-DATABASE_PATH = 'data/fpl_dashboard.db'
+# FPL API Configuration
+API_RATE_LIMIT_DELAY = 0.5  # Delay between API requests in seconds
+FPL_TEAM_ID = None  # Not needed for multi-league, kept for compatibility
 
-# API Rate Limiting
-API_RATE_LIMIT_DELAY = 1  # Seconds between API calls
+# Database Configuration
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'data', 'fpl_data.db')
 
-# Logging
+# Logging Configuration
 LOG_LEVEL = 'INFO'
-LOG_FILE = 'logs/vantix.log'
+LOG_FILE = os.path.join(os.path.dirname(__file__), 'logs', 'app.log')

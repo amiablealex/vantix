@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vantix - FPL League Analytics</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .landing-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: var(--spacing-xl) var(--spacing-md);
+        }
+
+        .landing-header {
+            text-align: center;
+            margin-bottom: var(--spacing-xl);
+            padding: var(--spacing-xl) 0;
+        }
+
+        .landing-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: var(--spacing-sm);
+            letter-spacing: -1px;
+        }
+
+        .landing-subtitle {
+            font-size: 1.125rem;
+            color: var(--color-text-light);
+            font-weight: 400;
+        }
+
+        .leagues-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: var(--spacing-lg);
+            margin-bottom: var(--spacing-xl);
+        }
+
+        .league-card {
+            background: var(--bg-card);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-lg);
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .league-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--color-primary), var(--color-accent-1));
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.3s ease;
+        }
+
+        .league-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--color-primary);
+        }
+
+        .league-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .league-name {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .league-description {
+            font-size: 0.875rem;
+            color: var(--color-text-light);
+            margin-bottom: var(--spacing-md);
+            line-height: 1.6;
+        }
+
+        .league-meta {
+            display: flex;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-md);
+            padding-top: var(--spacing-md);
+            border-top: 1px solid var(--bg-secondary);
+        }
+
+        .league-meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .league-meta-label {
+            font-size: 0.75rem;
+            color: var(--color-text-lighter);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .league-meta-value {
+            font-size: 1rem;
+            color: var(--color-text);
+            font-weight: 600;
+        }
+
+        .league-actions {
+            display: flex;
+            gap: var(--spacing-sm);
+        }
+
+        .btn {
+            flex: 1;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--border-radius-sm);
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--spacing-xs);
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--color-accent-1);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--color-text);
+        }
+
+        .btn-secondary:hover {
+            background: var(--color-accent-2);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: var(--spacing-xl) var(--spacing-md);
+            background: var(--bg-card);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: var(--spacing-md);
+        }
+
+        .empty-state-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--color-text);
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .empty-state-text {
+            font-size: 1rem;
+            color: var(--color-text-light);
+            margin-bottom: var(--spacing-md);
+        }
+
+        .empty-state-code {
+            background: var(--bg-secondary);
+            padding: var(--spacing-sm);
+            border-radius: var(--border-radius-sm);
+            font-family: monospace;
+            font-size: 0.875rem;
+            color: var(--color-text);
+            display: inline-block;
+        }
+
+        .footer {
+            text-align: center;
+            padding: var(--spacing-xl) 0;
+            color: var(--color-text-lighter);
+            font-size: 0.875rem;
+        }
+
+        .refresh-all-btn {
+            position: fixed;
+            bottom: var(--spacing-lg);
+            right: var(--spacing-lg);
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            box-shadow: var(--shadow-lg);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .refresh-all-btn:hover {
+            transform: scale(1.1);
+            background: var(--color-accent-1);
+        }
+
+        @media (max-width: 768px) {
+            .landing-title {
+                font-size: 2rem;
+            }
+
+            .landing-subtitle {
+                font-size: 1rem;
+            }
+
+            .leagues-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .league-name {
+                font-size: 1.25rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="landing-container">
+        <header class="landing-header">
+            <h1 class="landing-title">Vantix</h1>
+            <p class="landing-subtitle">Advanced FPL League Analytics</p>
+        </header>
+
+        {% if leagues %}
+        <div class="leagues-grid">
+            {% for league in leagues %}
+            <div class="league-card" onclick="window.location.href='/{{ league.code }}'">
+                <h2 class="league-name">{{ league.name }}</h2>
+                <p class="league-description">{{ league.description }}</p>
+                
+                <div class="league-meta">
+                    <div class="league-meta-item">
+                        <span class="league-meta-label">Teams</span>
+                        <span class="league-meta-value">{{ league.team_count }}</span>
+                    </div>
+                    <div class="league-meta-item">
+                        <span class="league-meta-label">Code</span>
+                        <span class="league-meta-value">{{ league.code }}</span>
+                    </div>
+                    {% if league.last_updated %}
+                    <div class="league-meta-item">
+                        <span class="league-meta-label">Updated</span>
+                        <span class="league-meta-value">{{ league.last_updated_display }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="league-actions">
+                    <a href="/{{ league.code }}" class="btn btn-primary" onclick="event.stopPropagation();">
+                        View Dashboard →
+                    </a>
+                    <button class="btn btn-secondary" onclick="event.stopPropagation(); refreshLeague({{ league.code }})">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">📊</div>
+            <h2 class="empty-state-title">No Leagues Configured</h2>
+            <p class="empty-state-text">Add your FPL leagues to config.py to get started</p>
+            <code class="empty-state-code">
+                LEAGUES = [{'code': 123456, 'name': 'My League', 'description': 'League description'}]
+            </code>
+        </div>
+        {% endif %}
+
+        <footer class="footer">
+            <p>Vantix &copy; 2025 - Elevating Your FPL Game</p>
+        </footer>
+    </div>
+
+    {% if leagues %}
+    <button class="refresh-all-btn" onclick="refreshAll()" title="Refresh all leagues">
+        🔄
+    </button>
+    {% endif %}
+
+    <script>
+        function refreshLeague(leagueCode) {
+            const btn = event.target;
+            btn.textContent = '...';
+            btn.disabled = true;
+
+            fetch(`/api/${leagueCode}/refresh`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        btn.textContent = '✓';
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        alert('Refresh failed: ' + data.message);
+                        btn.textContent = 'Refresh';
+                        btn.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to refresh league');
+                    btn.textContent = 'Refresh';
+                    btn.disabled = false;
+                });
+        }
+
+        function refreshAll() {
+            if (!confirm('Refresh all leagues? This may take a few minutes.')) {
+                return;
+            }
+
+            const btn = event.target;
+            btn.style.transform = 'rotate(360deg)';
+            btn.style.transition = 'transform 2s linear';
+
+            fetch('/api/refresh-all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    } else {
+                        alert('Refresh failed: ' + data.message);
+                        btn.style.transform = 'rotate(0deg)';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to refresh leagues');
+                    btn.style.transform = 'rotate(0deg)';
+                });
+        }
+    </script>
+</body>
+</html>

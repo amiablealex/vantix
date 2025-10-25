@@ -1,3 +1,6 @@
+// Extract league code from URL for API calls
+const leagueCode = window.location.pathname.split('/')[1] || '';
+
 /**
  * Vantix Dashboard - Main JavaScript
  * Master filter coordination and data loading - NOW FILTERS STATS TOO
@@ -140,7 +143,7 @@ function initializeStats() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/stats?${queryString}`)
+    fetch(`/api/${leagueCode}/stats?${queryString}`)
         .then(response => response.json())
         .then(data => {
             document.getElementById('stat-leader-value').textContent = data.current_leader.points;
@@ -174,7 +177,7 @@ function initializeTransfers() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/recent-transfers?${queryString}`)
+    fetch(`/api/${leagueCode}/recent-transfers?${queryString}`)
         .then(response => response.json())
         .then(data => {
             if (data.gameweek) {
@@ -239,7 +242,7 @@ function initializeComparison() {
     
     console.log('Initializing comparison with teams:', selectedTeams);
     
-    fetch(`/api/team-comparison?${queryString}`)
+    fetch(`/api/${leagueCode}/team-comparison?${queryString}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -335,7 +338,7 @@ function initializeBiggestMovers() {
     
     console.log('Initializing biggest movers with teams:', selectedTeams);
     
-    fetch(`/api/biggest-movers?${queryString}`)
+    fetch(`/api/${leagueCode}/biggest-movers?${queryString}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -396,7 +399,7 @@ function setupRefreshButton() {
         refreshButton.style.transform = 'rotate(360deg)';
         refreshButton.style.transition = 'transform 0.5s ease';
         
-        fetch('/api/refresh', { method: 'POST' })
+        fetch(`/api/${leagueCode}/refresh`, { method: 'POST' })
             .then(response => response.json())
             .then(data => {
                 if (data.status === 'success') {
@@ -429,7 +432,7 @@ function initializeWeeklyHeatmap() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/weekly-performance?${queryString}`)
+    fetch(`/api/${leagueCode}/weekly-performance?${queryString}`)
         .then(response => response.json())
         .then(data => {
             renderWeeklyHeatmap(data.teams);
@@ -497,7 +500,7 @@ function initializeHeadToHead() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/head-to-head?${queryString}`)
+    fetch(`/api/${leagueCode}/head-to-head?${queryString}`)
         .then(response => response.json())
         .then(data => {
             displayHeadToHead(data.teams);
@@ -548,7 +551,7 @@ function initializeDifferentials() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/differentials?${queryString}`)
+    fetch(`/api/${leagueCode}/differentials?${queryString}`)
         .then(response => response.json())
         .then(data => {
             displayDifferentials(data.teams);
@@ -595,7 +598,7 @@ function initializePodium() {
     const selectedTeams = Array.from(VantixDashboard.selectedTeams);
     const queryString = selectedTeams.map(id => `teams=${id}`).join('&');
     
-    fetch(`/api/podium?${queryString}`)
+    fetch(`/api/${leagueCode}/podium?${queryString}`)
         .then(response => response.json())
         .then(data => {
             displayPodium(data.podium);

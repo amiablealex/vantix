@@ -6,10 +6,11 @@ Main Flask Application
 from flask import Flask, render_template, jsonify, request
 from datetime import datetime
 import logging
-from data.database import init_db, get_db_connection
+from data.database import init_db, get_db_connection, get_league_connection, get_league_db_path
 from data.scheduler import init_scheduler
 from data.fpl_api import FPLDataCollector
 import config
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -27,16 +28,10 @@ init_db()
 # Initialize scheduler for data updates
 scheduler = init_scheduler(app)
 
-# Initialize FPL data collector
-fpl_collector = FPLDataCollector(
-    team_id=config.FPL_TEAM_ID,
-    league_id=config.FPL_LEAGUE_ID
-)
 
-
-def get_current_gameweek():
+def get_current_gameweek(league_code=None):
     """Get the current active gameweek"""
-    conn = get_db_connection()
+    conn = get_league_connection(league_code) if league_code else get_db_connection()
     # Find first unfinished gameweek
     current = conn.execute(
         'SELECT id FROM gameweeks WHERE finished = 0 ORDER BY id LIMIT 1'
@@ -52,9 +47,9 @@ def get_current_gameweek():
     return current['id'] if current else 1
 
 
-def get_last_completed_gameweek():
+def get_last_completed_gameweek(league_code=None):
     """Get the last completed (finished) gameweek"""
-    conn = get_db_connection()
+    conn = get_league_connection(league_code) if league_code else get_db_connection()
     last_completed = conn.execute(
         'SELECT MAX(id) as max_gw FROM gameweeks WHERE finished = 1'
     ).fetchone()
@@ -71,48 +66,103 @@ def get_season_string():
         return f"{now.year - 1}/{str(now.year)[-2:]}"
 
 
-@app.route('/')
-def index():
-    """Main dashboard view"""
+def format_time_ago(timestamp_str):
+    """Format timestamp as relative time"""
     try:
-        conn = get_db_connection()
+        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+        diff = now - dt
         
-        # Get current gameweek
-        current_gw = get_current_gameweek()
-        
-        # Get league teams
-        teams = conn.execute(
-            'SELECT entry_id, team_name, manager_name FROM teams ORDER BY team_name'
-        ).fetchall()
-        
-        # Get last updated timestamp
-        last_update = conn.execute(
-            'SELECT MAX(updated_at) as last_update FROM gameweek_points'
-        ).fetchone()
-        
-        conn.close()
-        
-        return render_template(
-            'dashboard.html',
-            current_gameweek=current_gw,
-            season=get_season_string(),
-            teams=[dict(t) for t in teams],
-            last_update=last_update['last_update'] if last_update else None,
-            league_name=config.LEAGUE_NAME
-        )
-    except Exception as e:
-        logger.error(f"Error loading dashboard: {e}")
-        return render_template('error.html', error=str(e)), 500
+        if diff.days > 365:
+            return f"{diff.days // 365}y ago"
+        elif diff.days > 30:
+            return f"{diff.days // 30}mo ago"
+        elif diff.days > 0:
+            return f"{diff.days}d ago"
+        elif diff.seconds > 3600:
+            return f"{diff.seconds // 3600}h ago"
+        elif diff.seconds > 60:
+            return f"{diff.seconds // 60}m ago"
+        else:
+            return "Just now"
+    except:
+        return "Unknown"
 
 
-@app.route('/api/cumulative-points')
-def api_cumulative_points():
+
+@app.route('/')
+def league_list():
+    """Landing page with all configured leagues"""
+    leagues_info = []
+    
+    for league in config.LEAGUES:
+        league_code = league['code']
+        db_path = get_league_db_path(league_code)
+        
+        info = {
+            'code': league_code,
+            'name': league['name'],
+            'description': league['description'],
+            'team_count': 0,
+            'last_updated': None,
+            'last_updated_display': 'Never'
+        }
+        
+        if os.path.exists(db_path):
+            try:
+                conn = get_league_connection(league_code)
+                count = conn.execute('SELECT COUNT(*) as count FROM teams').fetchone()
+                info['team_count'] = count['count'] if count else 0
+                
+                last_update = conn.execute(
+                    'SELECT MAX(created_at) as last_update FROM gameweek_points'
+                ).fetchone()
+                
+                if last_update and last_update['last_update']:
+                    info['last_updated'] = last_update['last_update']
+                    info['last_updated_display'] = format_time_ago(last_update['last_update'])
+                
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error reading league {league_code}: {e}")
+        
+        leagues_info.append(info)
+    
+    return render_template('league_list.html', leagues=leagues_info)
+
+
+@app.route('/<int:league_code>')
+def dashboard_league(league_code):
+    """Dashboard for specific league"""
+    league_config = next((l for l in config.LEAGUES if l['code'] == league_code), None)
+    
+    if not league_config:
+        return render_template('error.html', error=f'League {league_code} not configured'), 404
+    
+    db_path = get_league_db_path(league_code)
+    if not os.path.exists(db_path):
+        return render_template('error.html', 
+            error=f'No data for league {league_code}. Run collect_all_leagues.py first.'), 404
+
+    conn = get_league_connection(league_code)
+    teams = conn.execute('SELECT * FROM teams ORDER BY team_name').fetchall()
+    teams = [dict(team) for team in teams]  # Convert to list of dicts
+    conn.close()
+    
+    return render_template('dashboard.html', 
+        league_code=league_code,
+        league_name=league_config['name'],
+        teams=teams)
+
+
+@app.route('/api/<int:league_code>/cumulative-points')
+def api_cumulative_points(league_code):
     """API endpoint for cumulative points chart data"""
     try:
         selected_teams = request.args.getlist('teams')
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -165,14 +215,14 @@ def api_cumulative_points():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/league-positions')
-def api_league_positions():
+@app.route('/api/<int:league_code>/league-positions')
+def api_league_positions(league_code):
     """API endpoint for league position worm chart"""
     try:
         selected_teams = request.args.getlist('teams')
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -271,14 +321,14 @@ def api_league_positions():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/recent-transfers')
-def api_recent_transfers():
+@app.route('/api/<int:league_code>/recent-transfers')
+def api_recent_transfers(league_code):
     """API endpoint for recent transfers"""
     try:
         selected_teams = request.args.getlist('teams')
-        current_gw = get_current_gameweek()
+        current_gw = get_current_gameweek(league_code)
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -334,12 +384,12 @@ def api_recent_transfers():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/stats')
-def api_stats():
+@app.route('/api/<int:league_code>/stats')
+def api_stats(league_code):
     """API endpoint for league statistics - NOW FILTERED BY SELECTED TEAMS"""
     try:
         selected_teams = request.args.getlist('teams')
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         # Build WHERE clause for filtering
         where_clause = ""
@@ -418,12 +468,12 @@ def api_stats():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/form-chart')
-def api_form_chart():
+@app.route('/api/<int:league_code>/form-chart')
+def api_form_chart(league_code):
     """API endpoint for recent form (last 5 gameweeks)"""
     try:
         # Get the last completed gameweek
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         last_completed = conn.execute('''
             SELECT MAX(id) as max_gw
             FROM gameweeks
@@ -491,13 +541,13 @@ def api_form_chart():
         return jsonify({'error': str(e), 'teams': []}), 500
 
 
-@app.route('/api/points-distribution')
-def api_points_distribution():
+@app.route('/api/<int:league_code>/points-distribution')
+def api_points_distribution(league_code):
     """API endpoint for points distribution across all gameweeks"""
     try:
         selected_teams = request.args.getlist('teams')
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if selected_teams:
             placeholders = ','.join('?' * len(selected_teams))
@@ -547,8 +597,8 @@ def api_points_distribution():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/team-comparison')
-def api_team_comparison():
+@app.route('/api/<int:league_code>/team-comparison')
+def api_team_comparison(league_code):
     """API endpoint for detailed team comparison stats - NOW WITH HITS, COMPLETED GWs ONLY"""
     try:
         selected_teams = request.args.getlist('teams')
@@ -556,10 +606,10 @@ def api_team_comparison():
         if not selected_teams:
             return jsonify({'teams': []})
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         # Get last completed gameweek
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
         comparison_data = []
         
@@ -643,17 +693,17 @@ def api_team_comparison():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/biggest-movers')
-def api_biggest_movers():
+@app.route('/api/<int:league_code>/biggest-movers')
+def api_biggest_movers(league_code):
     """API endpoint for biggest position changes in last 5 GWs"""
     try:
         # Use last completed gameweek instead of current
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         past_gw = max(1, last_completed_gw - 5)
         
         selected_teams = request.args.getlist('teams')
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         # Get rankings for past_gw and current_gw
         if selected_teams:
@@ -781,14 +831,14 @@ def api_biggest_movers():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/weekly-performance')
-def api_weekly_performance():
+@app.route('/api/<int:league_code>/weekly-performance')
+def api_weekly_performance(league_code):
     """API endpoint for weekly performance heatmap - uses total GW points"""
     try:
         selected_teams = request.args.getlist('teams')
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if not selected_teams:
             conn.close()
@@ -832,14 +882,14 @@ def api_weekly_performance():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/head-to-head')
-def api_head_to_head():
+@app.route('/api/<int:league_code>/head-to-head')
+def api_head_to_head(league_code):
     """API endpoint for head-to-head weekly wins"""
     try:
         selected_teams = request.args.getlist('teams')
-        last_completed_gw = get_last_completed_gameweek()
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if not selected_teams or len(selected_teams) < 2:
             conn.close()
@@ -923,20 +973,20 @@ def api_head_to_head():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/differentials')
-def api_differentials():
+@app.route('/api/<int:league_code>/differentials')
+def api_differentials(league_code):
     """API endpoint for differential tracker - FILTER AWARE, calculates on-the-fly"""
     try:
         selected_teams = request.args.getlist('teams')
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if not selected_teams or len(selected_teams) < 2:
             conn.close()
             return jsonify({'teams': []})
         
         # Get current gameweek
-        current_gw = get_current_gameweek()
+        current_gw = get_current_gameweek(league_code)
         
         placeholders = ','.join('?' * len(selected_teams))
         
@@ -1013,13 +1063,13 @@ def api_differentials():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/podium')
-def api_podium():
+@app.route('/api/<int:league_code>/podium')
+def api_podium(league_code):
     """API endpoint for top 3 podium"""
     try:
         selected_teams = request.args.getlist('teams')
         
-        conn = get_db_connection()
+        conn = get_league_connection(league_code)
         
         if not selected_teams:
             conn.close()
@@ -1080,17 +1130,41 @@ def api_podium():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/refresh', methods=['POST'])
-def api_refresh():
-    """Manually trigger data refresh"""
+
+
+
+@app.route('/api/<int:league_code>/refresh', methods=['POST'])
+def api_refresh_league(league_code):
+    """Refresh specific league"""
     try:
-        logger.info("Manual data refresh triggered")
-        fpl_collector.collect_all_data()
-        return jsonify({'status': 'success', 'message': 'Data refreshed successfully'})
+        league_config = next((l for l in config.LEAGUES if l['code'] == league_code), None)
+        if not league_config:
+            return jsonify({'status': 'error', 'message': 'League not found'}), 404
+        
+        logger.info(f"Refreshing league {league_code}")
+        collector = FPLDataCollector(team_id=None, league_id=league_code)
+        collector.collect_all_data()
+        
+        return jsonify({'status': 'success', 'message': f'League {league_code} refreshed'})
     except Exception as e:
-        logger.error(f"Error refreshing data: {e}")
+        logger.error(f"Error refreshing league {league_code}: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@app.route('/api/refresh-all', methods=['POST'])
+def api_refresh_all():
+    """Refresh all configured leagues"""
+    try:
+        logger.info("Refreshing all leagues")
+        for league in config.LEAGUES:
+            logger.info(f"Refreshing league {league['code']}")
+            collector = FPLDataCollector(team_id=None, league_id=league['code'])
+            collector.collect_all_data()
+        
+        return jsonify({'status': 'success', 'message': 'All leagues refreshed'})
+    except Exception as e:
+        logger.error(f"Error refreshing all leagues: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.errorhandler(404)
 def not_found(e):
