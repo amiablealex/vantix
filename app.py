@@ -474,13 +474,15 @@ def api_recent_transfers(league_code):
                     tr.gameweek,
                     tr.transfers_in,
                     tr.transfers_out,
-                    tr.transfer_count
+                    tr.transfer_count,
+                    gp.event_transfers_cost
                 FROM teams t
                 LEFT JOIN transfers tr ON t.entry_id = tr.entry_id AND tr.gameweek = ?
+                LEFT JOIN gameweek_points gp ON t.entry_id = gp.entry_id AND gp.gameweek = ?
                 WHERE t.entry_id IN ({placeholders})
                 ORDER BY t.team_name
             '''
-            params = [current_gw] + selected_teams
+            params = [current_gw, current_gw] + selected_teams
             rows = conn.execute(query, params).fetchall()
         else:
             rows = conn.execute('''
@@ -489,36 +491,82 @@ def api_recent_transfers(league_code):
                     tr.gameweek,
                     tr.transfers_in,
                     tr.transfers_out,
-                    tr.transfer_count
+                    tr.transfer_count,
+                    gp.event_transfers_cost
                 FROM teams t
                 LEFT JOIN transfers tr ON t.entry_id = tr.entry_id AND tr.gameweek = ?
+                LEFT JOIN gameweek_points gp ON t.entry_id = gp.entry_id AND gp.gameweek = ?
                 ORDER BY t.team_name
+            ''', [current_gw, current_gw]).fetchall()
+        
+        # Get chip usage for current gameweek
+        if selected_teams:
+            chip_query = f'''
+                SELECT entry_id, chip_name
+                FROM chip_usage
+                WHERE gameweek = ? AND entry_id IN ({placeholders})
+            '''
+            chip_params = [current_gw] + selected_teams
+            chips = conn.execute(chip_query, chip_params).fetchall()
+        else:
+            chips = conn.execute('''
+                SELECT cu.entry_id, cu.chip_name
+                FROM chip_usage cu
+                JOIN teams t ON cu.entry_id = t.entry_id
+                WHERE cu.gameweek = ?
             ''', [current_gw]).fetchall()
         
         conn.close()
         
+        # Create chip lookup
+        chip_lookup = {}
+        for chip in chips:
+            chip_lookup[chip['entry_id']] = chip['chip_name']
+        
+        # Get entry_id lookup
+        conn = get_league_connection(league_code)
+        if selected_teams:
+            team_query = f'''
+                SELECT entry_id, team_name
+                FROM teams
+                WHERE entry_id IN ({placeholders})
+            '''
+            teams_data = conn.execute(team_query, selected_teams).fetchall()
+        else:
+            teams_data = conn.execute('SELECT entry_id, team_name FROM teams').fetchall()
+        conn.close()
+        
+        team_to_entry = {team['team_name']: team['entry_id'] for team in teams_data}
+        
         transfers = []
         for row in rows:
+            entry_id = team_to_entry.get(row['team_name'])
+            chip_used = chip_lookup.get(entry_id, None) if entry_id else None
+            transfer_cost = row['event_transfers_cost'] if row['event_transfers_cost'] else 0
+            
             if row['transfer_count'] and row['transfer_count'] > 0:
                 transfers.append({
                     'team_name': row['team_name'],
                     'transfers_in': row['transfers_in'].split(',') if row['transfers_in'] else [],
                     'transfers_out': row['transfers_out'].split(',') if row['transfers_out'] else [],
-                    'count': row['transfer_count']
+                    'count': row['transfer_count'],
+                    'transfer_cost': transfer_cost,
+                    'chip_used': chip_used
                 })
             else:
                 transfers.append({
                     'team_name': row['team_name'],
                     'transfers_in': [],
                     'transfers_out': [],
-                    'count': 0
+                    'count': 0,
+                    'transfer_cost': 0,
+                    'chip_used': chip_used
                 })
         
         return jsonify({'transfers': transfers, 'gameweek': current_gw})
     except Exception as e:
         logger.error(f"Error fetching recent transfers: {e}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/api/<int:league_code>/stats')
 @limiter.limit("120 per minute")

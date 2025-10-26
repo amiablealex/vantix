@@ -206,10 +206,25 @@ function displayTransfers(transfers) {
     }
     
     container.innerHTML = transfers.map(transfer => {
+        // Determine badge display
+        let badge = '';
+        
+        if (transfer.chip_used) {
+            // Chip used - show chip name with special styling
+            const chipDisplayName = getChipBadgeText(transfer.chip_used);
+            badge = `<span class="transfer-badge transfer-badge-chip">${chipDisplayName}</span>`;
+        } else if (transfer.transfer_cost > 0) {
+            // Points hit taken
+            badge = `<span class="transfer-badge transfer-badge-hit">-${transfer.transfer_cost} pts</span>`;
+        }
+        
         if (transfer.count === 0) {
             return `
                 <div class="transfer-item">
-                    <div class="transfer-team">${transfer.team_name}</div>
+                    <div class="transfer-team">
+                        ${transfer.team_name}
+                        ${badge}
+                    </div>
                     <div class="transfer-details no-transfers">No transfers made this week</div>
                 </div>
             `;
@@ -225,12 +240,25 @@ function displayTransfers(transfers) {
             
             return `
                 <div class="transfer-item">
-                    <div class="transfer-team">${transfer.team_name}</div>
+                    <div class="transfer-team">
+                        ${transfer.team_name}
+                        ${badge}
+                    </div>
                     <div class="transfer-details">${transferDetails}</div>
                 </div>
             `;
         }
     }).join('');
+}
+
+// Helper function to get chip badge text
+function getChipBadgeText(chipName) {
+    const chipLower = chipName.toLowerCase();
+    if (chipLower.includes('wildcard') || chipLower === 'wildcard') return 'Wildcard';
+    if (chipLower.includes('bench') || chipLower === 'bboost') return 'Bench Boost';
+    if (chipLower.includes('captain') || chipLower === '3xc') return 'Triple Captain';
+    if (chipLower.includes('free') || chipLower === 'freehit') return 'Free Hit';
+    return chipName;
 }
 
 // Initialize analytics sections
@@ -325,7 +353,9 @@ function displayComparison(teams) {
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Hits Taken</span>
-                <span class="comparison-stat-value ${getHighlightClass(team.hits_taken, 'hits_taken')}">${team.hits_taken}</span>
+                <span class="comparison-stat-value ${getHighlightClass(team.hits_taken, 'hits_taken')}">
+                    ${team.hits_taken}${team.hits_taken > 0 ? ` (-${team.hits_taken * 4} pts)` : ''}
+                </span>
             </div>
             <div class="comparison-stat-row">
                 <span class="comparison-stat-label">Chips Used</span>

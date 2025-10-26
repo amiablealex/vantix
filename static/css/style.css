@@ -494,6 +494,36 @@ p {
     font-weight: 500;
 }
 
+/* Transfer badges */
+.transfer-team {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.transfer-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.transfer-badge-hit {
+    background: rgba(241, 198, 183, 0.3);
+    color: #8B3A3A;
+    border: 1px solid rgba(241, 198, 183, 0.6);
+}
+
+.transfer-badge-chip {
+    background: rgba(168, 218, 220, 0.3);
+    color: #2D6A6A;
+    border: 1px solid rgba(168, 218, 220, 0.6);
+}
+
 @media (max-width: 640px) {
     .transfers-section {
         padding: var(--spacing-md);
