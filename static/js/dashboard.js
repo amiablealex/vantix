@@ -278,7 +278,7 @@ function displayComparison(teams) {
         total_points: { values: teams.map(t => t.total_points), higherIsBetter: true },
         avg_points: { values: teams.map(t => t.avg_points), higherIsBetter: true },
         highest_gw: { values: teams.map(t => t.highest_gw), higherIsBetter: true },
-        lowest_gw: { values: teams.map(t => t.lowest_gw), higherIsBetter: false },
+        lowest_gw: { values: teams.map(t => t.lowest_gw), higherIsBetter: true },
         total_transfers: { values: teams.map(t => t.total_transfers), higherIsBetter: true },
         hits_taken: { values: teams.map(t => t.hits_taken), higherIsBetter: false },
         chips_used: { values: teams.map(t => t.chips_used), higherIsBetter: false }
