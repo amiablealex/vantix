@@ -85,6 +85,33 @@ class FPLDataCollector:
         # If all gameweeks are finished, return the last one
         return events[-1]['id'] if events else 1
     
+    def get_last_completed_gameweek(self, bootstrap):
+        """Get the last gameweek that has finished"""
+        events = bootstrap['events']
+        
+        # Find the last finished gameweek
+        for event in reversed(events):
+            if event['finished']:
+                return event['id']
+        
+        # If no gameweek is finished yet, return 1
+        return 1
+    
+    def is_gameweek_started(self, bootstrap, gameweek_id):
+        """Check if a gameweek has started (deadline passed)"""
+        events = bootstrap['events']
+        event = next((e for e in events if e['id'] == gameweek_id), None)
+        
+        if not event:
+            return False
+        
+        # Parse deadline time
+        deadline_str = event['deadline_time']
+        deadline = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+        now = datetime.now(deadline.tzinfo) if deadline.tzinfo else datetime.now()
+        
+        return now >= deadline
+    
     def collect_all_data(self):
         """Main method to collect all FPL data and store in database"""
         logger.info(f"Starting data collection for league {self.league_code}...")
@@ -97,9 +124,18 @@ class FPLDataCollector:
             logger.info("Fetching bootstrap data...")
             bootstrap = self.get_bootstrap_data()
             
-            # Determine current gameweek
+            # Determine current and last completed gameweeks
             current_gw = self.get_current_gameweek(bootstrap)
+            last_completed_gw = self.get_last_completed_gameweek(bootstrap)
+            gameweek_started = self.is_gameweek_started(bootstrap, current_gw)
+            
             logger.info(f"Current gameweek: {current_gw}")
+            logger.info(f"Last completed gameweek: {last_completed_gw}")
+            logger.info(f"Current gameweek started: {gameweek_started}")
+            
+            # Use last completed GW for current squad data
+            squad_data_gw = last_completed_gw
+            logger.info(f"Using GW {squad_data_gw} for squad/differential data")
             
             # Build player maps with full details
             for player in bootstrap['elements']:
@@ -228,7 +264,8 @@ class FPLDataCollector:
                     total_clean_sheets = 0
                     
                     try:
-                        picks = self.get_entry_picks(entry_id, current_gw)
+                        # Use squad_data_gw (last completed) for player stats
+                        picks = self.get_entry_picks(entry_id, squad_data_gw)
                         for pick in picks['picks']:
                             player_id = pick['element']
                             # Get player from bootstrap data
@@ -254,7 +291,8 @@ class FPLDataCollector:
                     
                     # Store current squad for differential analysis
                     try:
-                        current_picks = self.get_entry_picks(entry_id, current_gw)
+                        # Use squad_data_gw (last completed) for current squad
+                        current_picks = self.get_entry_picks(entry_id, squad_data_gw)
                         squad_player_ids = [pick['element'] for pick in current_picks['picks']]
                         all_squads[entry_id] = squad_player_ids
                         
@@ -265,13 +303,13 @@ class FPLDataCollector:
                             VALUES (?, ?, ?, ?)
                         ''', (
                             entry_id,
-                            current_gw,
+                            squad_data_gw,
                             ','.join(map(str, squad_player_ids)),
                             datetime.now()
                         ))
                         
                     except Exception as e:
-                        logger.warning(f"Could not fetch current picks for differential: {e}")
+                        logger.warning(f"Could not fetch squad for differential (GW {squad_data_gw}): {e}")
                     
                 except Exception as e:
                     logger.error(f"Error collecting data for team {entry_id}: {e}")
@@ -302,7 +340,7 @@ class FPLDataCollector:
                         VALUES (?, ?, ?, ?)
                     ''', (
                         entry_id,
-                        current_gw,
+                        squad_data_gw,
                         ','.join(true_differentials) if true_differentials else '',
                         len(true_differentials)
                     ))

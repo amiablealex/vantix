@@ -78,6 +78,62 @@ def get_last_completed_gameweek(league_code=None):
     return last_completed['max_gw'] if last_completed and last_completed['max_gw'] else 1
 
 
+def get_gameweek_status(league_code=None):
+    """Get detailed gameweek status including whether current GW has started"""
+    conn = get_league_connection(league_code) if league_code else get_db_connection()
+    
+    # Get current (unfinished) gameweek
+    current_gw = conn.execute(
+        'SELECT id, deadline, finished FROM gameweeks WHERE finished = 0 ORDER BY id LIMIT 1'
+    ).fetchone()
+    
+    if not current_gw:
+        # All gameweeks finished
+        last_gw = conn.execute(
+            'SELECT id, deadline, finished FROM gameweeks ORDER BY id DESC LIMIT 1'
+        ).fetchone()
+        conn.close()
+        return {
+            'current_gw': last_gw['id'] if last_gw else 1,
+            'started': False,
+            'finished': True,
+            'status_text': f"GW {last_gw['id']} (Completed)" if last_gw else "Season Complete"
+        }
+    
+    # Check if deadline has passed
+    deadline_str = current_gw['deadline']
+    try:
+        deadline = datetime.fromisoformat(deadline_str.replace('Z', '+00:00'))
+        now = datetime.now(deadline.tzinfo) if deadline.tzinfo else datetime.now()
+        started = now >= deadline
+    except:
+        started = False
+    
+    conn.close()
+    
+    gw_num = current_gw['id']
+    status_text = f"GW {gw_num} (In Progress)" if started else f"GW {gw_num} (Not Started)"
+    
+    return {
+        'current_gw': gw_num,
+        'started': started,
+        'finished': False,
+        'status_text': status_text
+    }
+
+
+def get_transfer_gameweek(league_code=None):
+    """Get the gameweek to use for displaying transfers (last completed or current if started)"""
+    gw_status = get_gameweek_status(league_code)
+    
+    # If current gameweek has started, use it for transfers
+    # Otherwise use the last completed gameweek
+    if gw_status['started']:
+        return gw_status['current_gw']
+    else:
+        return get_last_completed_gameweek(league_code)
+
+
 def get_season_string():
     """Get current FPL season string (e.g., '2024/25')"""
     now = datetime.now()
@@ -272,7 +328,8 @@ def dashboard_league(league_code):
     teams = conn.execute('SELECT * FROM teams ORDER BY team_name').fetchall()
     teams = [dict(team) for team in teams]
     
-    current_gw = get_current_gameweek(league_code)
+    # Get gameweek status
+    gw_status = get_gameweek_status(league_code)
     
     last_update_row = conn.execute(
         'SELECT MAX(created_at) as last_update FROM gameweek_points'
@@ -285,7 +342,8 @@ def dashboard_league(league_code):
         league_code=league_code,
         league_name=league_config['name'],
         teams=teams,
-        current_gameweek=current_gw,
+        current_gameweek=gw_status['current_gw'],
+        gameweek_status=gw_status['status_text'],
         season=get_season_string(),
         last_update=last_update
     )
@@ -459,10 +517,11 @@ def api_league_positions(league_code):
 @limiter.limit("120 per minute")
 @cache.cached(timeout=300, query_string=True)
 def api_recent_transfers(league_code):
-    """API endpoint for recent transfers"""
+    """API endpoint for recent transfers - uses appropriate gameweek"""
     try:
         selected_teams = request.args.getlist('teams')
-        current_gw = get_current_gameweek(league_code)
+        # Use transfer_gameweek instead of current_gw
+        transfer_gw = get_transfer_gameweek(league_code)
         
         conn = get_league_connection(league_code)
         
@@ -482,7 +541,7 @@ def api_recent_transfers(league_code):
                 WHERE t.entry_id IN ({placeholders})
                 ORDER BY t.team_name
             '''
-            params = [current_gw, current_gw] + selected_teams
+            params = [transfer_gw, transfer_gw] + selected_teams
             rows = conn.execute(query, params).fetchall()
         else:
             rows = conn.execute('''
@@ -497,16 +556,16 @@ def api_recent_transfers(league_code):
                 LEFT JOIN transfers tr ON t.entry_id = tr.entry_id AND tr.gameweek = ?
                 LEFT JOIN gameweek_points gp ON t.entry_id = gp.entry_id AND gp.gameweek = ?
                 ORDER BY t.team_name
-            ''', [current_gw, current_gw]).fetchall()
+            ''', [transfer_gw, transfer_gw]).fetchall()
         
-        # Get chip usage for current gameweek
+        # Get chip usage for transfer gameweek
         if selected_teams:
             chip_query = f'''
                 SELECT entry_id, chip_name
                 FROM chip_usage
                 WHERE gameweek = ? AND entry_id IN ({placeholders})
             '''
-            chip_params = [current_gw] + selected_teams
+            chip_params = [transfer_gw] + selected_teams
             chips = conn.execute(chip_query, chip_params).fetchall()
         else:
             chips = conn.execute('''
@@ -514,7 +573,7 @@ def api_recent_transfers(league_code):
                 FROM chip_usage cu
                 JOIN teams t ON cu.entry_id = t.entry_id
                 WHERE cu.gameweek = ?
-            ''', [current_gw]).fetchall()
+            ''', [transfer_gw]).fetchall()
         
         conn.close()
         
@@ -563,7 +622,7 @@ def api_recent_transfers(league_code):
                     'chip_used': chip_used
                 })
         
-        return jsonify({'transfers': transfers, 'gameweek': current_gw})
+        return jsonify({'transfers': transfers, 'gameweek': transfer_gw})
     except Exception as e:
         logger.error(f"Error fetching recent transfers: {e}")
         return jsonify({'error': str(e)}), 500
@@ -1142,7 +1201,7 @@ def api_head_to_head(league_code):
 @limiter.limit("120 per minute")
 @cache.cached(timeout=300, query_string=True)
 def api_differentials(league_code):
-    """API endpoint for differential tracker"""
+    """API endpoint for differential tracker - uses last completed gameweek"""
     try:
         selected_teams = request.args.getlist('teams')
         
@@ -1152,7 +1211,8 @@ def api_differentials(league_code):
             conn.close()
             return jsonify({'teams': []})
         
-        current_gw = get_current_gameweek(league_code)
+        # Use last completed GW for differentials
+        last_completed_gw = get_last_completed_gameweek(league_code)
         
         placeholders = ','.join('?' * len(selected_teams))
         
@@ -1162,7 +1222,7 @@ def api_differentials(league_code):
             JOIN teams t ON cs.entry_id = t.entry_id
             WHERE cs.entry_id IN ({placeholders})
             AND cs.gameweek = ?
-        ''', selected_teams + [current_gw]).fetchall()
+        ''', selected_teams + [last_completed_gw]).fetchall()
         
         if not squad_rows:
             conn.close()
