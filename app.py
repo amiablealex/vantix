@@ -834,7 +834,6 @@ def api_points_distribution(league_code):
         logger.error(f"Error fetching points distribution: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/<int:league_code>/team-comparison')
 @limiter.limit("120 per minute")
 @cache.cached(timeout=300, query_string=True)
@@ -891,11 +890,17 @@ def api_team_comparison(league_code):
                 WHERE entry_id = ?
             ''', [team_id]).fetchone()
             
-            hits_taken = conn.execute('''
-                SELECT COUNT(*) as hits
-                FROM transfers
-                WHERE entry_id = ? AND transfer_count > 1
+            # FIXED: Count hits by checking event_transfers_cost > 0
+            # Each hit costs 4 points, so divide by 4 to get number of hits
+            hits_data = conn.execute('''
+                SELECT SUM(event_transfers_cost) as total_cost
+                FROM gameweek_points
+                WHERE entry_id = ? AND event_transfers_cost > 0
             ''', [team_id]).fetchone()
+            
+            # Calculate number of hits (each hit = 4 points)
+            total_cost = hits_data['total_cost'] if hits_data['total_cost'] else 0
+            hits_taken = total_cost // 4  # Integer division
             
             chips_used = conn.execute('''
                 SELECT COUNT(*) as count
@@ -911,7 +916,7 @@ def api_team_comparison(league_code):
                 'highest_gw': highest_gw['highest'] if highest_gw['highest'] else 0,
                 'lowest_gw': lowest_gw['lowest'] if lowest_gw['lowest'] else 0,
                 'total_transfers': total_transfers['total'] if total_transfers['total'] else 0,
-                'hits_taken': hits_taken['hits'] if hits_taken['hits'] else 0,
+                'hits_taken': hits_taken,
                 'chips_used': chips_used['count'] if chips_used['count'] else 0
             })
         
